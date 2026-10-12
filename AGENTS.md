@@ -18,7 +18,7 @@ Working notes for anyone (human or agent) changing this project. The product ove
 ## Rules for changes
 
 - Use xAI's public docs (docs.x.ai) as the source for realtime fields and endpoints. Markdown copies of the voice docs are in `xai-speech-docs/` (refresh with `xai-speech-docs/fetch.sh`). When a behavior is undocumented, add a check to `spikes/phase0.py` before relying on it.
-- Use `grok-4.3` for text-model work (optimiser, summaries) through `langchain-xai`. Pin voice-model changes in `VOICE_MODEL`.
+- Use `grok-4.3` for summaries and `grok-4.6` with low reasoning for the prompt optimiser, both through `langchain-xai`. Pin voice-model changes in `VOICE_MODEL`.
 - Keep the graph transport-agnostic: nodes return `actions`, and the controller performs them. Do not send realtime events from graph nodes.
 - Every tool name the compiler or a prompt mentions must be attached. The linter enforces this, so keep it passing.
 - Never log or return secret values. Credentials go through `tools/secrets.py` or `credentials.py`, encrypted with `security/crypto.py`.

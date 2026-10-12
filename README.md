@@ -12,7 +12,7 @@ It is built on public xAI APIs:
 - Remote MCP, plus web search and X search
 - SIP phone numbers
 
-LangGraph orchestrates each conversation, and LangChain provides the tools, MCP adapters, and retrieval. A built-in prompt optimiser uses `grok-4.3` and xAI's voice prompting guide.
+LangGraph orchestrates each conversation, and LangChain provides the tools, MCP adapters, and retrieval. A built-in prompt optimiser uses `grok-4.6` with low reasoning and xAI's voice prompting guide.
 
 ## Features
 
@@ -35,15 +35,77 @@ LangGraph orchestrates each conversation, and LangChain provides the tools, MCP 
 
 ## How it works
 
-```
-Browser ──REST──────────────▶ FastAPI ── Postgres/SQLite (agents, conversations, turns, secrets)
-   │  └─control WebSocket───▶ SessionController ── LangGraph runtime (checkpointer + store)
-   │                              │        └── Tool registry (HTTP, plugins, managed MCP, knowledge)
-   └─ephemeral token──▶ wss://api.x.ai/v1/realtime ◀── Relay / SIP transports (server-side key)
-xAI SIP ──signed webhook──▶ /webhooks/xai/call-incoming ──▶ call worker (SipTransport)
+xAI's realtime model runs every conversation. Voice Stack is the control plane around it: it stores agents, compiles each agent into a realtime `session.update`, executes tools, routes handoffs, keeps history, and answers phone calls. The same LangGraph graph serves browser previews and phone calls.
+
+```mermaid
+flowchart LR
+  subgraph People
+    direction TB
+    B["Builder in a browser<br/>design agents, preview calls"]
+    C["Caller on a phone"]
+  end
+
+  subgraph VS["Voice Stack · one container image"]
+    direction TB
+    API["FastAPI<br/>REST · control WebSocket · SIP webhooks"]
+    CTRL["SessionController<br/>turns events into actions"]
+    G["LangGraph runtime<br/>agents · handoffs · memory"]
+    T["Tool registry<br/>HTTP · plugins · MCP · knowledge"]
+    OPT["Prompt optimiser"]
+    DB[("Postgres or SQLite<br/>agents · turns · events · encrypted keys")]
+    API --> CTRL --> G --> T
+    API --> OPT
+    G --> DB
+    API --> DB
+  end
+
+  subgraph XAI["xAI API"]
+    direction TB
+    RT["Realtime voice<br/>wss://api.x.ai/v1/realtime"]
+    SIP["SIP phone numbers<br/>sip.voice.x.ai"]
+    TXT["Text models<br/>grok-4.3 · grok-4.6"]
+    COL["Files and Collections"]
+  end
+
+  EXT["Your systems<br/>APIs · CRM · MCP servers"]
+
+  B -->|"UI, REST, control WebSocket"| API
+  B <-.->|"direct-mode preview audio<br/>with an ephemeral token"| RT
+  CTRL <-->|"relay mode and phone calls<br/>server-side socket"| RT
+  C -->|"carrier SIP trunk"| SIP
+  SIP ---|"audio bridged by xAI"| RT
+  SIP -->|"signed webhook"| API
+  T --> EXT
+  T -->|"file_search"| COL
+  OPT -->|"grok-4.6, low reasoning"| TXT
+  G -->|"post-call summary, grok-4.3"| TXT
 ```
 
-xAI's realtime model runs every conversation. Voice Stack is the control plane around it: it stores agents, compiles each agent into a realtime `session.update`, executes tools, routes handoffs, keeps history, and answers phone calls. The same LangGraph graph serves browser previews and phone calls. See [`docs/architecture.md`](docs/architecture.md).
+A phone call, step by step:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Caller
+  participant Carrier as Carrier SIP trunk
+  participant X as xAI SIP + realtime
+  participant VS as Voice Stack telephony
+  participant Sys as Your systems
+  Caller->>Carrier: Dials your number
+  Carrier->>X: SIP INVITE to sip.voice.x.ai
+  X->>VS: Signed webhook with call_id
+  VS->>X: Join the call, session.update (prompt, voice, tools)
+  X-->>Caller: Greeting
+  Caller->>X: Asks a question
+  X->>VS: Transcript and function call
+  VS->>Sys: Tool call (HTTP, MCP, or plugin)
+  Sys-->>VS: Result
+  VS->>X: function_call_output, or session.update for a handoff
+  X-->>Caller: Answer, in the next agent's voice after a handoff
+  Note over VS: On hangup, Voice Stack saves the summary (grok-4.3) and caller memory
+```
+
+See [`docs/architecture.md`](docs/architecture.md) for the components and the LangGraph runtime.
 
 ## Requirements
 
@@ -102,7 +164,8 @@ Open http://localhost:8000.
 | `AUTH_MODE` / `ADMIN_TOKEN` | production | Builder access: `none`, `token`, or `proxy` (IAP, Cloudflare Access). |
 | `PUBLIC_BASE_URL` | for SIP | Public HTTPS URL that xAI sends call webhooks to. |
 | `ROLE` | no | `all`, `app` (UI + API), or `telephony` (webhooks + call workers). |
-| `VOICE_MODEL` / `TEXT_MODEL` | no | Defaults `grok-voice-latest` / `grok-4.3`. Pin the voice model version in production. |
+| `VOICE_MODEL` / `TEXT_MODEL` | no | Defaults `grok-voice-latest` / `grok-4.3` (summaries, X search). Pin the voice model version in production. |
+| `OPTIMIZER_MODEL` / `OPTIMIZER_REASONING_EFFORT` | no | Prompt optimiser. Defaults `grok-4.6` / `low`. `grok-4.6` cannot turn reasoning off, so `low` is the lightest setting. |
 | `HANDOFF_VOICE_MODE` | no | `in_session` (switch voice on handoff) or `keep`. |
 | `EMBEDDINGS_PROVIDER` | no | For local knowledge bases: `fastembed` (local, no key) or `openai_compatible`. |
 | `RECORD_EVENTS` | no | Store the realtime event log for each conversation (default on). |
@@ -145,6 +208,89 @@ uv run voicestack deploy compose --dry-run      # deployment scripts: compose, c
 In production, run two services from the same image: `ROLE=app` for the builder (behind an identity proxy) and `ROLE=telephony` for phone calls.
 
 The [`.grok/skills/`](.grok/skills/) folder has runbooks a coding agent can follow: deploy to Cloud Run, Compose, or Kubernetes; register a SIP number; add a connector; add a knowledge provider. They are plain Markdown.
+
+### Running on Kubernetes in your cloud
+
+Voice Stack runs in your cluster as two Deployments from one image. Everything it stores stays in your cloud: agents, conversations, transcripts, event logs, caller memory, and encrypted keys. The speech itself runs at xAI. Callers and carriers talk to xAI, and xAI calls your cluster only for the signed call webhook.
+
+```mermaid
+flowchart TB
+  subgraph OUT["Outside your cloud"]
+    direction LR
+    USERS["Builders' browsers"]
+    CALLERS["Callers"] --> CARRIER["SIP carrier or PBX<br/>Twilio · Telnyx · Plivo"]
+    subgraph XAI["xAI · api.x.ai"]
+      direction TB
+      RT["Realtime voice + SIP<br/>sip.voice.x.ai"]
+      TXT["Text models<br/>grok-4.3 · grok-4.6"]
+      COL["Files and Collections"]
+      XT["Web search · X search<br/>xAI-hosted MCP"]
+    end
+    PUB["Public APIs and MCP servers<br/>(optional)"]
+  end
+
+  subgraph CLOUD["Your cloud · GKE, EKS, AKS, or on-prem"]
+    direction LR
+    IDP["Identity proxy<br/>IAP · oauth2-proxy"]
+    subgraph NS["Kubernetes namespace: voicestack"]
+      direction TB
+      ING["Ingress<br/>builder host · webhook host"]
+      APP["voicestack-app<br/>UI + API · HPA"]
+      TEL["voicestack-telephony<br/>call sockets · PDB"]
+      SEC["Secret + ConfigMap"]
+      ING -->|"builder host"| APP
+      ING -->|"/webhooks only"| TEL
+      SEC -.-> APP
+      SEC -.-> TEL
+    end
+    PG[("Postgres<br/>Cloud SQL · RDS · Azure")]
+    INT["Internal systems<br/>CRM · ticketing · databases · private MCP"]
+    APP --> PG
+    TEL --> PG
+    APP --> INT
+    TEL --> INT
+  end
+
+  USERS -->|"HTTPS + SSO"| IDP --> ING
+  USERS <-.->|"direct-mode preview audio<br/>ephemeral token"| RT
+  CARRIER -->|"SIP"| RT
+  RT -->|"signed call webhook"| ING
+  APP ==>|"egress to api.x.ai<br/>HTTPS + WSS"| XAI
+  TEL ==> XAI
+  XT -.->|"called from xAI"| PUB
+
+  classDef outside fill:#f4f4f5,stroke:#a1a1aa,color:#18181b
+  classDef xai fill:#e4e4e7,stroke:#52525b,color:#18181b
+  classDef yours fill:#ecfdf5,stroke:#10b981,color:#064e3b
+  class USERS,CALLERS,CARRIER,PUB outside
+  class RT,TXT,COL,XT xai
+  class IDP,ING,APP,TEL,SEC,PG,INT yours
+  style CLOUD fill:#f0fdf4,stroke:#10b981,color:#064e3b
+  style NS fill:#dcfce7,stroke:#059669,color:#064e3b
+  style OUT fill:#fafafa,stroke:#a1a1aa,color:#18181b
+  style XAI fill:#f4f4f5,stroke:#52525b,color:#18181b
+```
+
+| Component | Where it runs | What it does |
+|---|---|---|
+| `voicestack-app` | Your cluster | Builder UI and API, browser previews, the prompt optimiser. Scales with an HPA. |
+| `voicestack-telephony` | Your cluster | Receives call webhooks and holds one realtime socket per call. A PodDisruptionBudget and a one-hour grace period let calls finish during rollouts. |
+| Postgres | Your cloud (managed or in-cluster) | Agents, versions, conversations, turns, event logs, LangGraph checkpoints and caller memory, encrypted API keys and tool secrets, and local-mode knowledge chunks. |
+| Identity proxy | Your cloud | Puts the builder behind your SSO (`AUTH_MODE=proxy`). |
+| Internal systems | Your cloud | Called by HTTP tools, code plugins, and MCP servers run by Voice Stack. They never need to be public. |
+| xAI API | Outside, at xAI | Speech-to-speech model, SIP termination, text models, ephemeral tokens, voices, Collections, and web and X search. |
+| SIP carrier or PBX | Outside | Points your phone numbers at `sip.voice.x.ai`. It never connects to your cluster. |
+| Builders' browsers | Outside | Load the UI through the identity proxy. In direct mode they also hold the call audio socket to xAI with a short-lived ephemeral token. They never receive your API key. |
+
+Network rules:
+
+- **Inbound:** two hostnames on the Ingress. The builder host sits behind your identity proxy. The webhook host is public but routes only `/webhooks` and `/healthz` to telephony pods, and every webhook is checked against the number's signing secret.
+- **Outbound:** `api.x.ai` over HTTPS and WSS from both Deployments, plus whatever internal or public systems your tools call. Local-mode knowledge downloads its embedding model from Hugging Face on first use, unless the image is built with `--build-arg PRELOAD_EMBEDDINGS=true`.
+- **Browsers:** direct-mode previews need WSS to `api.x.ai` from the builder's network. Relay mode sends preview audio through your cluster instead.
+
+What reaches xAI: call audio, transcripts, agent prompts and tool results during a call, text sent to the optimiser and post-call summaries, and documents in Collections-mode knowledge bases. Local-mode knowledge bases keep documents and embeddings in your Postgres. Tools that xAI hosts (xAI-hosted MCP, web search, X search) are called from xAI, so any MCP server in xAI-hosted mode must be reachable from the internet. Use MCP run by Voice Stack for private servers.
+
+Step-by-step setup is in [`docs/deploy/kubernetes.md`](docs/deploy/kubernetes.md) and the `deploy-kubernetes` skill.
 
 ## Docs
 

@@ -61,6 +61,8 @@ export const useAppSettings = () =>
         role: string
         voice_model: string
         text_model: string
+        optimizer_model: string
+        optimizer_reasoning_effort: string
         handoff_voice_mode: string
         public_base_url: string | null
         database: string

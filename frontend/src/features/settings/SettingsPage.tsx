@@ -200,6 +200,7 @@ export function SettingsPage() {
                 Version: app.version,
                 'Voice model': app.voice_model,
                 'Text model': app.text_model,
+                'Prompt optimiser': `${app.optimizer_model} · ${app.optimizer_reasoning_effort} reasoning`,
                 'Handoff voice mode': app.handoff_voice_mode,
                 Database: app.database,
                 Embeddings: `${app.embeddings_provider} · ${app.embeddings_model}`,

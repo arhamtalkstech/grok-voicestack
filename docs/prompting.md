@@ -33,8 +33,8 @@ The score starts at 100. Each error subtracts 15, each warning 7, each info 2.
 **Optimise with guide** on the Prompt tab (or `voicestack prompt optimize <slug>`) runs a LangGraph subgraph in `prompting/optimizer.py`:
 
 1. **lint:** the deterministic checks above.
-2. **critique:** `grok-4.3` with the guide's "Instruction quality check" meta-prompt and the full guide in context. It returns issues with quoted snippets.
-3. **rewrite:** `grok-4.3` with structured output. It returns the six sections and a changelog that ties every change to a guide rule or an observed issue. It is told the agent's real tools, handoffs, greeting, and facts.
+2. **critique:** `grok-4.6` (low reasoning; set `OPTIMIZER_MODEL` and `OPTIMIZER_REASONING_EFFORT`) with the guide's "Instruction quality check" meta-prompt and the full guide in context. It returns issues with quoted snippets.
+3. **rewrite:** the same model with structured output. It returns the six sections and a changelog that ties every change to a guide rule or an observed issue. It is told the agent's real tools, handoffs, greeting, and facts.
 4. **validate:** re-lints the result. It checks that every URL, email, phone number, price, and time from the original survives verbatim, and that no unattached tool is mentioned. On failure it loops back to rewrite with the problems listed, at most twice.
 
 Modes:

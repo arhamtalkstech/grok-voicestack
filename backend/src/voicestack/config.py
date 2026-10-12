@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     xai_realtime_url: str = "wss://api.x.ai/v1/realtime"
     voice_model: str = "grok-voice-latest"
     text_model: str = "grok-4.3"
+    # Prompt optimiser. grok-4.6 cannot turn reasoning off; "low" is its fastest setting.
+    optimizer_model: str = "grok-4.6"
+    optimizer_reasoning_effort: Literal["low", "medium", "high"] = "low"
     ephemeral_token_ttl_s: int = 300
     # Function tool wire shape for session.update; the docs show both. Phase 0 settles it.
     realtime_function_tool_shape: Literal["flat", "nested"] = "flat"

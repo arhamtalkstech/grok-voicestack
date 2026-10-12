@@ -25,6 +25,8 @@ async def app_settings() -> dict[str, Any]:
         "auth_mode": s.auth_mode,
         "voice_model": s.voice_model,
         "text_model": s.text_model,
+        "optimizer_model": s.optimizer_model,
+        "optimizer_reasoning_effort": s.optimizer_reasoning_effort,
         "handoff_voice_mode": s.handoff_voice_mode,
         "public_base_url": s.public_base_url,
         "database": "postgres" if s.is_postgres else "sqlite",

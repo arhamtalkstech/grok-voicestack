@@ -1,7 +1,7 @@
 """Prompt optimiser: rewrites an agent prompt so it follows the xAI prompting guide.
 
 LangGraph subgraph: lint -> critique -> rewrite -> validate (-> rewrite, at most twice) -> END.
-The critique and rewrite steps use grok-4.3 through langchain-xai with structured output; lint and
+The critique and rewrite steps use OPTIMIZER_MODEL (grok-4.6, low reasoning) through langchain-xai with structured output; lint and
 validate are deterministic so the result can be checked, not just trusted.
 """
 
@@ -135,9 +135,15 @@ def _context_block(agent: AgentSpec, managed: list[str]) -> str:
     return "\n".join(lines)
 
 
-def _model(api_key: str, effort: str = "low") -> ChatXAI:
+def _model(api_key: str) -> ChatXAI:
     settings = get_settings()
-    return ChatXAI(model=settings.text_model, api_key=api_key, reasoning_effort=effort, timeout=600, max_retries=2)
+    return ChatXAI(
+        model=settings.optimizer_model,
+        api_key=api_key,
+        reasoning_effort=settings.optimizer_reasoning_effort,
+        timeout=600,
+        max_retries=2,
+    )
 
 
 def build_optimizer(api_key: str):
