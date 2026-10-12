@@ -4,7 +4,9 @@ A knowledge base is a set of documents an agent answers from during calls. It ru
 
 ## xAI Collections (default)
 
-The files live in xAI, and the voice model searches them server-side, with no function round trip. Everything uses your regular xAI API key on `api.x.ai`, verified live on 2026-10-12. xAI's docs describe the collection-management calls (create, attach, delete) on `management-api.x.ai` with a Management API key; see `docs/known-gaps.md`.
+The files live in xAI, and the voice model searches them server-side, with no function round trip. Every call below uses your regular xAI API key on `api.x.ai`, so you do not need a Management API key. This was verified live on 2026-10-12: create, upload, attach, index, search, and delete all succeeded with a regular key. xAI's Collections guide describes the management calls (create, attach, delete) on `management-api.x.ai` with a Management API key. That host rejects a regular key, so Voice Stack uses the `api.x.ai` routes.
+
+Indexing time at xAI varies from seconds to several minutes. The upload waits up to six minutes and then shows the document as "indexing". The Knowledge page re-checks it until xAI finishes.
 
 | Step | Call |
 |---|---|

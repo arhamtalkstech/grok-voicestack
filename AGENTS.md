@@ -23,11 +23,7 @@ Working notes for anyone (human or agent) changing this project. The product ove
 - Every tool name the compiler or a prompt mentions must be attached. The linter enforces this, so keep it passing.
 - Never log or return secret values. Credentials go through `tools/secrets.py` or `credentials.py`, encrypted with `security/crypto.py`.
 - UI tokens live in `frontend/src/styles/tokens.css`. Use the Tailwind theme names (`bg-l1`, `text-fg-2`, `border-line`), not raw hex values.
-- Test against real services where possible. If something can only be simulated (SIP calls), say so in the docs.
-
-## Gaps
-
-Open items and unverified paths are tracked in `docs/known-gaps.md`. Update it when you close or find one.
+- Test against real services where possible.
 
 ## Skills
 

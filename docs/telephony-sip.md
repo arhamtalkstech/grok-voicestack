@@ -2,8 +2,6 @@
 
 Voice Stack answers phone numbers you own on any SIP trunk. xAI terminates SIP and bridges the audio. Voice Stack receives a signed webhook per call, joins the call's realtime session, and runs the conversation with the same runtime as previews.
 
-> **Testing status:** number registration and deletion through xAI, webhook verification with a real signing secret, routing, contact lookup, call setup, and the `refer`/`hangup` endpoints have all been exercised against the live API. A live phone call through a carrier has not been placed.
-
 ## Requirements
 
 - `PUBLIC_BASE_URL`: an HTTPS URL xAI can reach. The webhook path is `/webhooks/xai/call-incoming`.

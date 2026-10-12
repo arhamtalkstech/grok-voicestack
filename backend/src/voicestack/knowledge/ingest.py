@@ -14,6 +14,7 @@ import io
 import logging
 from pathlib import Path
 
+import httpx
 from langchain_core.documents import Document as LCDocument
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -94,7 +95,7 @@ async def ingest_document(doc_id: str) -> None:
         log.exception("Ingestion failed for %s", filename)
         async with session_scope() as db:
             doc = await db.get(Document, doc_id)
-            doc.status, doc.error = "error", str(exc)[:1000]
+            doc.status, doc.error = "error", (str(exc) or type(exc).__name__)[:1000]
 
 
 async def _ingest_local(path: Path, kb_id: str, doc_id: str) -> int:
@@ -139,7 +140,12 @@ async def _ingest_collections(
             (await db.get(Document, doc_id)).external_file_id = uploaded["id"]
         # xAI chunks and embeds asynchronously; wait so the document only shows "ready" when searchable.
         for _ in range(120):
-            docs = await client.list_documents(collection_id)
+            try:
+                docs = await client.list_documents(collection_id)
+            except httpx.TransportError as exc:  # one slow status check should not fail the upload
+                log.warning("Status check for %s failed (%s); retrying", filename, type(exc).__name__)
+                await asyncio.sleep(3)
+                continue
             doc = next((d for d in docs if (d.get("file_metadata") or {}).get("file_id") == uploaded["id"]), None)
             state = document_state(doc) if doc else "processing"
             if state == "processed":

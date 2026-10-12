@@ -312,6 +312,8 @@ async def stored_turns(conversation_id: str):
         return (await db.execute(select(Turn).where(Turn.conversation_id == conversation_id).order_by(Turn.seq))).scalars().all()
 
 
+# xAI indexing alone can take about six minutes, which is the ingest wait.
+@pytest.mark.timeout(600)
 async def test_live_knowledge_collections(landscape):
     """Default mode: xAI Files API -> xAI Collection -> file_search run by xAI during the call."""
     from voicestack.db.models import ConversationEvent, Document, KnowledgeBase

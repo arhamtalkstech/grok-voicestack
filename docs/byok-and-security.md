@@ -35,7 +35,7 @@ HTTP tools and run-by-Voice-Stack MCP servers go through an SSRF guard. Destinat
 - Deleting a conversation removes its turns, its event log, and its LangGraph checkpoint thread.
 - Custom voice uploads require confirming that the speaker consented to cloning.
 
-## Known gaps
+## Access control
 
-- `AUTH_MODE=proxy` trusts the identity header. It does not verify the IAP JWT (`x-goog-iap-jwt-assertion`). Add verification if the service could be reached without the proxy.
-- There are no per-user roles; everyone with access is an admin.
+- `AUTH_MODE=proxy` trusts the identity header, so expose the builder only through the proxy. To accept traffic that could bypass it, add IAP JWT verification (`x-goog-iap-jwt-assertion`).
+- Everyone with access is an admin.

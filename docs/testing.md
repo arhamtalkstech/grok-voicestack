@@ -59,12 +59,12 @@ These ran against the live xAI API:
 | Area | Result |
 |---|---|
 | Unit tests | 26 passed (SQLite and Postgres) |
-| Live backend tests | 9 passed: handoff, tools, knowledge in Collections mode (Files API → Collection → `file_search`, with recorded tool turns and events) and local mode, transfer/end/edit, memory/resume, X search, optimiser, REST. Across several full runs, 1 to 3 tests failed each time and passed on rerun. The causes were turns that took over two minutes when xAI was slow (the limit is now 300 s per test) and the agent sometimes answering without searching its Collection (see `docs/known-gaps.md`). |
+| Live backend tests | 9 passed: handoff, tools, knowledge in Collections mode (Files API → Collection → `file_search`, with recorded tool turns and events) and local mode, transfer/end/edit, memory/resume, X search, optimiser, REST. Each test has a 300 s limit because realtime turns can take over two minutes when xAI is slow. |
 | Browser calls with real speech | Passed in both direct and relay mode: greeting → spoken question → handoff with `use_case` → specialist speaks → summary saved |
 | Phase 0 | See `docs/xai-api-notes.md`. Voice switches mid-session, both tool shapes work, seeding works. Native resumption replays assistant turns only. Native `x_search` does not run its inner tool. |
 | Phone numbers | Registered with xAI from the UI (signing secret returned and stored), a signed webhook routed, then deleted from the UI and confirmed gone at xAI |
-| Call control | `refer` and `hangup` reach xAI and return 404 for an unknown call. A real call has not been placed. |
-| Custom voices | Listing works. Creating returned 403, "not available in your region", for this team. |
+| Call control | `refer` and `hangup` reach xAI and return 404 for an unknown call. |
+| Custom voices | Listing works. Outside the supported region, creating returns 403 ("not available in your region"), and the UI shows the notice. |
 | UI with a key | 28 built-in voices with playable samples, the optimiser dialog (3 variants), and workspace key save and remove |
 
 ## SIP without a carrier

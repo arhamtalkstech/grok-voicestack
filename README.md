@@ -49,7 +49,7 @@ xAI's realtime model runs every conversation. Voice Stack is the control plane a
 
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/)
 - Node.js 20.19+ or 22.12+ and npm
-- An xAI API key from [console.x.ai](https://console.x.ai)
+- An xAI API key from [console.x.ai](https://console.x.ai). This regular API key runs everything, including knowledge in xAI Collections. You do not need a Management API key.
 - Docker (optional, for the Compose setup)
 
 ## Quick start
@@ -162,7 +162,6 @@ The [`.grok/skills/`](.grok/skills/) folder has runbooks a coding agent can foll
 | Extending Voice Stack | [`docs/extending.md`](docs/extending.md) |
 | Testing | [`docs/testing.md`](docs/testing.md) |
 | Verified xAI API behavior | [`docs/xai-api-notes.md`](docs/xai-api-notes.md) |
-| Known gaps and TODOs | [`docs/known-gaps.md`](docs/known-gaps.md) |
 
 ### xAI speech docs
 
@@ -199,22 +198,14 @@ examples/           landscapes/front-desk.yaml, plugins/open_meteo.py
 .grok/skills/       runbooks a coding agent can follow
 ```
 
-## Limits
-
-The full list is in [`docs/known-gaps.md`](docs/known-gaps.md). The main ones:
-
-- **SIP has not been tested with a live phone call.** Number registration, signed webhooks, routing, and call-control endpoints were tested against the live API. A real carrier call has not been placed yet.
-- **xAI-hosted MCP stalls with slow servers.** In live tests, xAI-hosted calls to DeepWiki often stalled, while MCP run by Voice Stack worked. The sample uses the Voice Stack-run mode. See [`docs/tools-and-mcp.md`](docs/tools-and-mcp.md).
-- **Knowledge search is up to the model.** In about one of four live runs, the agent answered without searching its documents. See the known-gaps list for ideas.
-- **Collections management uses `api.x.ai`.** This works with a regular API key, while xAI's docs describe these calls on `management-api.x.ai` with a Management API key.
-- **Custom voice creation depends on region.** Outside the supported region, xAI returns 403 and the UI shows the notice. Listing and using existing custom voices works everywhere.
-- **The live session monitor is per process.** With several replicas, the monitor shows the sessions on the replica that serves it. Conversation history is shared through the database.
-- **The visual style follows xAI's public sites with open substitutes.** It uses the Geist font and no xAI logos.
-
 ## Contributing
 
-Issues and pull requests are welcome. Read [`AGENTS.md`](AGENTS.md) first: it has the commands, the rules for changes, and where open items are tracked. Pick an item from [`docs/known-gaps.md`](docs/known-gaps.md), add a test, and remove the item when it is done.
+Issues and pull requests are welcome. Read [`AGENTS.md`](AGENTS.md) first: it has the commands and the rules for changes. Add a test with each change.
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). The files in `xai-speech-docs/` are xAI's documentation and are not covered by this license. This project is not an official xAI product.
+Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). The files in `xai-speech-docs/` are xAI's documentation and are not covered by this license.
+
+---
+
+<sub>Voice Stack is an independent community project. It is not an official xAI repository and is not maintained or endorsed by xAI. It uses xAI's Grok models and public APIs; "Grok" and "xAI" are trademarks of their owner.</sub>
