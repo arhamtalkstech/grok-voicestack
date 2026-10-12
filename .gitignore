@@ -1,0 +1,85 @@
+# Keep secrets, dependencies, caches, and local data out of git.
+
+# Secrets
+.env
+.env.*
+!.env.example
+!.env*.example
+!.env.sample
+!.env*.sample
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+*-credentials.json
+service-account*.json
+.xai_api_key
+secrets/
+
+# Dependencies
+node_modules/
+.pnp
+.pnpm-store/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build / cache
+.next/
+out/
+dist/
+build/
+coverage/
+.turbo/
+.cache/
+*.tsbuildinfo
+.vercel
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+# Agent runbooks in .grok/skills/ are part of the project; other agent state is not.
+.grok/*
+!.grok/skills/
+.claude/
+
+# Local data
+*.log
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.duckdb
+
+# Models / media / local datasets
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.gguf
+*.ckpt
+*.npy
+*.npz
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.zip
+**/chromadb/
+**/vectordb/
+
+# Voice Stack runtime data (SQLite, uploads, embedding models, dev encryption key)
+data/
+backend/data/
+frontend/test-results/
+frontend/playwright-report/

@@ -1,0 +1,264 @@
+{
+  "title": "Streaming Text to Speech",
+  "endpoint": "wss://api.x.ai/v1/tts",
+  "description": "Bidirectional streaming text-to-speech via WebSocket. Send text incrementally and receive audio chunks in real time. Shares the `/v1/tts` path with the batch POST endpoint — a GET with `Upgrade: websocket` activates streaming mode. Configuration is done via query parameters at connection time. Supports multi-utterance: after `audio.done`, send another stream of `text.delta` messages on the same connection.",
+
+  "authentication": {
+    "headers": [
+      {
+        "name": "Authorization",
+        "type": "string",
+        "required": true,
+        "description": "Bearer token for authentication. Use your xAI API key.",
+        "example": "Bearer $XAI_API_KEY"
+      }
+    ]
+  },
+
+  "queryParameters": [
+    {
+      "name": "voice",
+      "type": "string",
+      "required": false,
+      "description": "Voice identifier. Use a built-in voice from `GET /v1/tts/voices` (e.g. `eve`, `ara`) or a custom voice ID.",
+      "default": "eve"
+    },
+    {
+      "name": "language",
+      "type": "string",
+      "required": true,
+      "description": "BCP-47 language code (e.g. `en`, `zh`, `pt-BR`) or `auto` for automatic language detection. Case-insensitive.",
+      "enum": [
+        "auto",
+        "en",
+        "ar-EG",
+        "ar-SA",
+        "ar-AE",
+        "bn",
+        "zh",
+        "fr",
+        "de",
+        "hi",
+        "id",
+        "it",
+        "ja",
+        "ko",
+        "pt-BR",
+        "pt-PT",
+        "ru",
+        "es-MX",
+        "es-ES",
+        "tr",
+        "vi"
+      ]
+    },
+    {
+      "name": "codec",
+      "type": "string",
+      "required": false,
+      "description": "Audio codec for the output.",
+      "default": "mp3",
+      "enum": ["mp3", "wav", "pcm", "mulaw", "alaw"]
+    },
+    {
+      "name": "sample_rate",
+      "type": "integer",
+      "required": false,
+      "description": "Sample rate in Hz.",
+      "default": "24000",
+      "enum": [8000, 16000, 22050, 24000, 44100, 48000]
+    },
+    {
+      "name": "bit_rate",
+      "type": "integer",
+      "required": false,
+      "description": "Bit rate in bps. Only applies when `codec` is `mp3`.",
+      "default": "128000",
+      "enum": [32000, 64000, 96000, 128000, 192000]
+    },
+    {
+      "name": "optimize_streaming_latency",
+      "type": "integer",
+      "required": false,
+      "description": "Latency optimization level. `0` (default): No optimization — best audio quality. `1`: Reduced first-chunk size for lower time-to-first-audio, with minor quality tradeoff at chunk boundaries.",
+      "default": "0",
+      "enum": [0, 1]
+    },
+    {
+      "name": "speed",
+      "type": "number",
+      "required": false,
+      "description": "Speech speed multiplier. `1.0` is normal speed. Values below `1.0` slow down speech, values above `1.0` speed it up. Range: `0.7` to `1.5`.",
+      "default": "1.0"
+    },
+    {
+      "name": "text_normalization",
+      "type": "boolean",
+      "required": false,
+      "description": "Enable text normalization before synthesis. When enabled, the model normalizes written-form text (e.g. numbers, abbreviations, symbols) into spoken-form before generating audio.",
+      "default": "false"
+    },
+    {
+      "name": "with_timestamps",
+      "type": "boolean",
+      "required": false,
+      "description": "Return per-character timing metadata on each `audio.delta` event. When `true`, every `audio.delta` carries `audio_timestamps`.",
+      "default": "false"
+    }
+  ],
+
+  "clientMessages": [
+    {
+      "type": "text.delta",
+      "description": "Send a chunk of text to be synthesized. Text is processed incrementally — audio generation begins as soon as enough text is buffered. Individual deltas are capped at 60,000 characters.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "delta"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `text.delta`."
+          },
+          "delta": {
+            "type": "string",
+            "description": "Text chunk to synthesize. Supports speech tags like `[laugh]`, `[pause]`, `[whisper]`."
+          }
+        }
+      },
+      "example": {
+        "type": "text.delta",
+        "delta": "Hello! Welcome to streaming text to speech. "
+      }
+    },
+    {
+      "type": "text.done",
+      "description": "Signal that all text for this utterance has been sent. The server will finish generating audio and send `audio.done`. After receiving `audio.done`, you can start a new utterance with another `text.delta`.",
+      "schema": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `text.done`."
+          }
+        }
+      },
+      "example": {
+        "type": "text.done"
+      }
+    }
+  ],
+
+  "serverMessages": [
+    {
+      "type": "audio.delta",
+      "description": "A chunk of base64-encoded audio data. Decode and append to your audio buffer or pipe directly to playback. The format matches the `codec` and `sample_rate` specified in the query parameters. When the connection was opened with `with_timestamps=true`, the event also carries `audio_timestamps` and `audio_duration` for the characters that fall inside this chunk.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Always `audio.delta`."
+          },
+          "delta": {
+            "type": "string",
+            "description": "Base64-encoded audio data chunk."
+          },
+          "audio_timestamps": {
+            "type": "object",
+            "description": "Per-character forced-alignment timings for this chunk. Present only when the connection was opened with `with_timestamps=true`. Times are session-relative seconds, so they are directly comparable across chunks within an utterance.",
+            "properties": {
+              "graph_chars": {
+                "type": "array",
+                "description": "Each character covered by this audio chunk, in order. Includes spaces, punctuation, and any speech tag characters from the original input.",
+                "items": { "type": "string" }
+              },
+              "graph_times": {
+                "type": "array",
+                "description": "Parallel array of `[start, end]` seconds for each entry in `graph_chars`.",
+                "items": {
+                  "type": "array",
+                  "items": { "type": "number", "format": "double" },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              }
+            }
+          },
+          "audio_duration": {
+            "type": "number",
+            "format": "double",
+            "description": "Duration of this audio chunk in seconds. Present only when the connection was opened with `with_timestamps=true`."
+          }
+        }
+      },
+      "example": {
+        "type": "audio.delta",
+        "delta": "<Base64EncodedAudioData>",
+        "audio_timestamps": {
+          "graph_chars": ["H", "e", "l", "l", "o"],
+          "graph_times": [
+            [0.0, 0.06],
+            [0.06, 0.12],
+            [0.12, 0.18],
+            [0.18, 0.24],
+            [0.24, 0.34]
+          ]
+        },
+        "audio_duration": 0.34
+      }
+    },
+    {
+      "type": "audio.done",
+      "description": "Audio generation for this utterance is complete. The connection remains open for multi-utterance — send another `text.delta` to start a new synthesis, or close the connection.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Always `audio.done`."
+          },
+          "trace_id": {
+            "type": "string",
+            "description": "Unique trace identifier for this utterance. Useful for debugging."
+          }
+        }
+      },
+      "example": {
+        "type": "audio.done",
+        "trace_id": "550e8400-e29b-41d4-a716-446655440000"
+      }
+    },
+    {
+      "type": "error",
+      "description": "An error occurred during synthesis. The connection may be closed after this message.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Always `error`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error description."
+          }
+        }
+      },
+      "example": {
+        "type": "error",
+        "message": "TTS failed: internal error"
+      }
+    }
+  ],
+
+  "exampleFlow": [
+    { "direction": "client", "type": "text.delta" },
+    { "direction": "client", "type": "text.delta" },
+    { "direction": "client", "type": "text.done" },
+    { "direction": "server", "type": "audio.delta" },
+    { "direction": "server", "type": "audio.delta" },
+    { "direction": "server", "type": "audio.delta" },
+    { "direction": "server", "type": "audio.done" }
+  ]
+}

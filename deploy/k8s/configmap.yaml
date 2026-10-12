@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: voicestack
+data:
+  APP_ENV: production
+  AUTH_MODE: proxy
+  VOICE_MODEL: grok-voice-think-fast-2.0
+  # Public URL of the telephony Ingress host; numbers registered from the UI point here.
+  PUBLIC_BASE_URL: https://voice-webhooks.example.com
+  SEED_EXAMPLE: "false"

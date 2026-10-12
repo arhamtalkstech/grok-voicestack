@@ -1,0 +1,2701 @@
+{
+  "title": "Realtime Speech to Speech",
+  "endpoint": "wss://api.x.ai/v1/realtime",
+  "description": "Real-time voice conversations with Grok models via WebSocket. The connection begins with an HTTP GET that is upgraded to WebSocket (status 101). Once connected, the client and server exchange JSON messages to configure the session, stream audio, and receive responses. For SIP calls, connect with the `call_id` from a `realtime.call.incoming` webhook.",
+  "authentication": {
+    "headers": [
+      {
+        "name": "Authorization",
+        "type": "string",
+        "required": true,
+        "description": "Bearer token for authentication. Use your xAI API key (server-side only) or an ephemeral client secret from the Create client secret endpoint.",
+        "example": "Bearer $XAI_API_KEY"
+      },
+      {
+        "name": "Sec-WebSocket-Protocol",
+        "type": "string",
+        "required": false,
+        "description": "Alternative authentication for browser clients. Pass the ephemeral token with prefix `xai-client-secret.`. When provided, the Authorization header is not required.",
+        "example": "xai-client-secret.<EPHEMERAL_TOKEN>"
+      }
+    ]
+  },
+  "queryParameters": [
+    {
+      "name": "call_id",
+      "type": "string",
+      "required": false,
+      "description": "SIP call identifier from a `realtime.call.incoming` webhook. When provided, the WebSocket connects to that inbound SIP call. Authenticate with an xAI API key; ephemeral client secrets are not supported for SIP `call_id` sessions."
+    },
+    {
+      "name": "model",
+      "type": "string",
+      "required": false,
+      "default": "grok-voice-latest",
+      "enum": ["grok-voice-latest", "grok-voice-think-fast-2.0"],
+      "description": "Model to use for the session. Ignored when `call_id` is provided because the session is bound to the inbound SIP call. Use grok-voice-latest for the best experience on direct WebSocket sessions."
+    },
+    {
+      "name": "reasoning.effort",
+      "type": "string",
+      "required": false,
+      "enum": ["high", "none"],
+      "default": "high",
+      "description": "Controls whether the model uses reasoning. Defaults to `high`."
+    }
+  ],
+  "clientMessages": [
+    {
+      "type": "session.update",
+      "description": "Update session configuration such as system prompt, voice, audio format, turn detection, and tools.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "session"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Event type identifier. Must be `session.update`."
+          },
+          "session": {
+            "type": "object",
+            "description": "Session configuration object.",
+            "properties": {
+              "model": {
+                "type": "string",
+                "enum": ["grok-voice-latest", "grok-voice-think-fast-2.0"],
+                "description": "Model to use for the session. Defaults to `grok-voice-latest`. Can also be set at connection time via the `model` query parameter."
+              },
+              "instructions": {
+                "type": "string",
+                "description": "System prompt for the voice agent."
+              },
+              "reasoning": {
+                "type": "object",
+                "description": "Reasoning settings for models that support them.",
+                "properties": {
+                  "effort": {
+                    "type": "string",
+                    "enum": ["high", "none"],
+                    "default": "high",
+                    "description": "Controls whether the model uses reasoning. Defaults to `high`. Can also be set at connection time via the `reasoning.effort` query parameter."
+                  }
+                }
+              },
+              "voice": {
+                "type": "string",
+                "description": "Voice identifier. Use a built-in voice (e.g. Eve, Ara) or a custom voice ID."
+              },
+              "turn_detection": {
+                "type": "object",
+                "description": "Voice Activity Detection (VAD) settings.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "`\"server_vad\"` for automatic detection, `null` for manual text turns."
+                  },
+                  "idle_timeout_ms": {
+                    "type": "number",
+                    "description": "When set, the server proactively re-engages the user if no speech is detected for this many milliseconds after the assistant finishes responding, emitting `input_audio_buffer.timeout_triggered` and generating a check-in. Re-arms after every response. Default: null (disabled)."
+                  }
+                }
+              },
+              "resumption": {
+                "type": "object",
+                "description": "Session resumption settings (xAI extension). Caches conversation turns keyed by the `conversation_id` query parameter and replays them on reconnect.",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "description": "Opt in to session resumption so prior turns are replayed to the model on reconnect. Default: false."
+                  }
+                }
+              },
+              "audio": {
+                "type": "object",
+                "description": "Audio format and transport for input and output. `format` selects the codec; `transport` selects the wire path. Default transport is `json` (base64 in Realtime events). Set `transport` to `binary` to send/receive raw codec bytes as WebSocket binary frames (no protocol header). For `audio/opus`, each payload is one raw Opus packet (24 kHz). Input dual-accepts both channels for the configured format; output emits on the configured transport only. Mid-session `output.transport` changes apply at the next response boundary.",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "description": "Input audio format and transport.",
+                    "properties": {
+                      "format": {
+                        "type": "object",
+                        "description": "Audio format specification.",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["audio/pcm", "audio/pcmu", "audio/pcma", "audio/opus"],
+                            "description": "Audio encoding format. `audio/pcm` for raw PCM, `audio/pcmu` for G.711 u-law (telephony), `audio/pcma` for G.711 A-law (telephony), `audio/opus` for raw Opus packets (24 kHz)."
+                          },
+                          "rate": {
+                            "type": "integer",
+                            "enum": [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000],
+                            "description": "Sample rate in Hz (PCM only). Default: 24000. Use 8000 for telephony (G.711)."
+                          }
+                        }
+                      },
+                      "transport": {
+                        "type": "string",
+                        "enum": ["json", "binary"],
+                        "description": "Preferred wire path for input audio. `json` (default): base64 in `input_audio_buffer.append`. `binary`: raw codec bytes as WebSocket binary frames. Server accepts both for the configured format (dual-accept)."
+                      },
+                      "transcription": {
+                        "type": "object",
+                        "description": "Transcription configuration for the user's input audio.",
+                        "properties": {
+                          "language_hint": {
+                            "type": "string",
+                            "description": "BCP-47 language code (e.g. `ja`, `ar`, `es-MX`, `pt-BR`) to bias ASR transcription toward a specific language. Can be updated mid-session."
+                          },
+                          "keyterms": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Key terms to bias transcription toward (e.g. product names, proper nouns). Repeat for each term. Max 100 terms, each up to 50 characters. Can be updated mid-session."
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "output": {
+                    "type": "object",
+                    "description": "Output audio format and transport.",
+                    "properties": {
+                      "format": {
+                        "type": "object",
+                        "description": "Audio format specification.",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["audio/pcm", "audio/pcmu", "audio/pcma", "audio/opus"],
+                            "description": "Audio encoding format. `audio/pcm` for raw PCM, `audio/pcmu` for G.711 u-law (telephony), `audio/pcma` for G.711 A-law (telephony), `audio/opus` for raw Opus packets (24 kHz)."
+                          },
+                          "rate": {
+                            "type": "integer",
+                            "enum": [8000, 11025, 16000, 22050, 24000, 32000, 44100, 48000],
+                            "description": "Sample rate in Hz (PCM only). Default: 24000. Use 8000 for telephony (G.711)."
+                          }
+                        }
+                      },
+                      "transport": {
+                        "type": "string",
+                        "enum": ["json", "binary"],
+                        "description": "Wire path for assistant audio. `json` (default): base64 in `response.output_audio.delta` / `response.audio.delta`. `binary`: raw codec bytes as WebSocket binary frames (lifecycle events remain JSON). Changes apply at the next response boundary."
+                      },
+                      "speed": {
+                        "type": "number",
+                        "description": "Playback speed multiplier for assistant audio output. Range: 0.7–1.5. Default: 1.0. Values below 1.0 slow down speech; values above 1.0 speed it up."
+                      }
+                    }
+                  }
+                }
+              },
+              "tools": {
+                "type": "array",
+                "description": "Tools available to the voice agent.",
+                "items": {
+                  "type": "object",
+                  "required": ["type"],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": ["function", "web_search", "x_search", "file_search", "mcp"],
+                      "description": "Tool type."
+                    },
+                    "function": {
+                      "type": "object",
+                      "description": "For `function` type: the function definition.",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "Function name."
+                        },
+                        "description": {
+                          "type": "string",
+                          "description": "Description of what the function does."
+                        },
+                        "parameters": {
+                          "type": "object",
+                          "description": "JSON Schema object describing the function parameters."
+                        }
+                      }
+                    },
+                    "location": {
+                      "type": "object",
+                      "description": "For `web_search` type: optional location context for search results. Also accepted under the text-API name `user_location`.",
+                      "properties": {
+                        "country": {
+                          "type": "string",
+                          "description": "Country name or ISO 3166-1 alpha-2 code."
+                        },
+                        "city": {
+                          "type": "string",
+                          "description": "City name."
+                        },
+                        "region": {
+                          "type": "string",
+                          "description": "State or region name."
+                        },
+                        "timezone": {
+                          "type": "string",
+                          "description": "IANA timezone, e.g., `America/Los_Angeles`."
+                        }
+                      }
+                    },
+                    "allowed_domains": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 5,
+                      "description": "For `web_search` type: only include results from these domains (no protocol or path). Mutually exclusive with `excluded_domains` — do not set both on the same tool."
+                    },
+                    "excluded_domains": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 5,
+                      "description": "For `web_search` type: exclude results from these domains. Mutually exclusive with `allowed_domains` — do not set both on the same tool."
+                    },
+                    "allowed_x_handles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 20,
+                      "description": "For `x_search` type: only include posts from these X handles (without `@`). Mutually exclusive with `excluded_x_handles` — do not set both on the same tool."
+                    },
+                    "excluded_x_handles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 20,
+                      "description": "For `x_search` type: exclude posts from these X handles. Mutually exclusive with `allowed_x_handles` — do not set both on the same tool."
+                    },
+                    "from_date": {
+                      "type": "string",
+                      "format": "date",
+                      "description": "For `x_search` type: only consider posts from this date, ISO-8601 `YYYY-MM-DD`. Must not be later than `to_date`."
+                    },
+                    "to_date": {
+                      "type": "string",
+                      "format": "date",
+                      "description": "For `x_search` type: only consider posts up to this date, ISO-8601 `YYYY-MM-DD`."
+                    },
+                    "enable_image_understanding": {
+                      "type": "boolean",
+                      "description": "For `web_search` and `x_search` types: let the agent view images found in results."
+                    },
+                    "enable_video_understanding": {
+                      "type": "boolean",
+                      "description": "For `x_search` type: let the agent view videos in posts."
+                    },
+                    "vector_store_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "For `file_search` type: array of vector store IDs to search."
+                    },
+                    "max_num_results": {
+                      "type": "integer",
+                      "description": "For `file_search` type: maximum number of results to return."
+                    },
+                    "server_label": {
+                      "type": "string",
+                      "description": "For `mcp` type: unique label for the MCP server (no dots allowed, use hyphens)."
+                    },
+                    "server_url": {
+                      "type": "string",
+                      "description": "For `mcp` type: URL of the MCP server."
+                    },
+                    "allowed_tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "For `mcp` type: optional list of tool names to allow from this server."
+                    },
+                    "authorization": {
+                      "type": "string",
+                      "description": "For `mcp` type: optional authorization token to send with requests."
+                    },
+                    "headers": {
+                      "type": "object",
+                      "description": "For `mcp` type: optional custom headers to send with requests."
+                    },
+                    "server_description": {
+                      "type": "string",
+                      "description": "For `mcp` type: optional description of the MCP server for the model."
+                    }
+                  }
+                }
+              },
+              "replace": {
+                "type": ["object", "null"],
+                "additionalProperties": { "type": "string" },
+                "description": "Spoken-text find-and-replace map applied to the model's output before TTS, e.g. `{\"Acme Mobile\": \"Acme Mobull\"}`. Each key is matched case-insensitively on whole-word boundaries with the configured replacement casing preserved; longest match wins. Changes only the spoken audio, not the transcript the user sees. The applied map is echoed back on `session.updated`."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "type": "session.update",
+        "session": {
+          "voice": "Eve",
+          "instructions": "You are a helpful assistant.",
+          "replace": { "Acme Mobile": "Acme Mobull" },
+          "turn_detection": {
+            "type": "server_vad"
+          },
+          "audio": {
+            "input": {
+              "format": {
+                "type": "audio/pcm",
+                "rate": 24000
+              },
+              "transcription": {
+                "language_hint": "en",
+                "keyterms": ["xAI", "Grok", "Understand The Universe"]
+              }
+            },
+            "output": {
+              "format": {
+                "type": "audio/pcm",
+                "rate": 24000
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "input_audio_buffer.append",
+      "description": "Append chunks of base64-encoded audio data to the input buffer. The server does not send back a corresponding message.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "audio"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `input_audio_buffer.append`."
+          },
+          "audio": {
+            "type": "string",
+            "description": "Base64-encoded audio data chunk."
+          }
+        }
+      },
+      "example": {
+        "type": "input_audio_buffer.append",
+        "audio": "<Base64EncodedAudioData>"
+      }
+    },
+    {
+      "type": "input_audio_buffer.commit",
+      "description": "Commit the audio buffer as a user message. Only available when `turn_detection` type is `null`. Confirmed by `input_audio_buffer.committed` from the server.",
+      "schema": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `input_audio_buffer.commit`."
+          }
+        }
+      },
+      "example": {
+        "type": "input_audio_buffer.commit"
+      }
+    },
+    {
+      "type": "conversation.item.create",
+      "description": "Create a new conversation item. Can be a user text message, an assistant text message for history seeding, a function call for seeding tool-use history, or a function call output.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "item"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `conversation.item.create`."
+          },
+          "previous_item_id": {
+            "type": "string",
+            "description": "Optional. Used to insert the turn into a specific position in history."
+          },
+          "item": {
+            "description": "The conversation item to create.",
+            "oneOf": [
+              {
+                "type": "object",
+                "title": "Message",
+                "description": "A text message from a user, assistant, or system role.",
+                "required": ["type", "role", "content"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Always `message`.",
+                    "enum": ["message"]
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["user", "assistant", "system"],
+                    "description": "Role of the message sender. Use `user` for user messages, `assistant` for seeding assistant history, or `system` for system-level context."
+                  },
+                  "id": {
+                    "type": "string",
+                    "description": "Optional client-generated item ID."
+                  },
+                  "content": {
+                    "type": "array",
+                    "description": "Array of content parts.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["input_text", "input_audio", "text", "audio"],
+                          "description": "Content type. Use `input_text` for user text input, `input_audio` for user audio input, `text` for general text, or `audio` for audio content."
+                        },
+                        "text": {
+                          "type": "string",
+                          "description": "Text content. Used with `input_text` or `text` content types."
+                        },
+                        "audio": {
+                          "type": "string",
+                          "description": "Base64-encoded audio data. Used with `input_audio` or `audio` content types."
+                        },
+                        "transcript": {
+                          "type": "string",
+                          "description": "Transcript of the audio content, if available."
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "title": "Function call",
+                "description": "Inject an assistant-initiated function call into the conversation history. Use this to seed tool-use history when reconnecting or restoring a previous session. Pair with a corresponding `function_call_output` item to provide the tool result.",
+                "required": ["type", "name", "arguments"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Always `function_call`.",
+                    "enum": ["function_call"]
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "The name of the function that was called."
+                  },
+                  "arguments": {
+                    "type": "string",
+                    "description": "JSON string of the function arguments."
+                  },
+                  "call_id": {
+                    "type": "string",
+                    "description": "The unique identifier for this function call. Use the same `call_id` in the corresponding `function_call_output` item."
+                  },
+                  "id": {
+                    "type": "string",
+                    "description": "Optional client-generated item ID."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "title": "Function call output",
+                "description": "Return the result of a function call to the model. Send this after receiving a `response.function_call_arguments.done` event, then call `response.create` to continue.",
+                "required": ["type", "call_id", "output"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Always `function_call_output`.",
+                    "enum": ["function_call_output"]
+                  },
+                  "call_id": {
+                    "type": "string",
+                    "description": "The `call_id` from the `response.function_call_arguments.done` event."
+                  },
+                  "output": {
+                    "type": "string",
+                    "description": "JSON string of the function result."
+                  },
+                  "id": {
+                    "type": "string",
+                    "description": "Optional client-generated item ID."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "title": "Force message",
+                "description": "Make the agent speak a hard-coded, TTS-synthesized line (not model-generated). The server synthesizes the text, injects a full response lifecycle (`response.created` → audio deltas → `response.done`), and records the utterance in conversation context as an assistant message. Do not send `response.create` after this — the force message is the complete turn. xAI extension; not part of the OpenAI Realtime API.",
+                "required": ["type", "role", "content"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Always `force_message`.",
+                    "enum": ["force_message"]
+                  },
+                  "role": {
+                    "type": "string",
+                    "description": "Always `assistant`.",
+                    "enum": ["assistant"]
+                  },
+                  "content": {
+                    "type": "array",
+                    "description": "Array with a single content part containing the text to synthesize.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "description": "Content type.",
+                          "enum": ["output_text"]
+                        },
+                        "text": {
+                          "type": "string",
+                          "description": "Verbatim text to synthesize via TTS."
+                        }
+                      }
+                    }
+                  },
+                  "interruptible": {
+                    "type": "boolean",
+                    "description": "Whether the user can interrupt playback by speaking. When `false`, caller audio is dropped until playback completes. Default: `true`."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "example": {
+        "type": "conversation.item.create",
+        "item": {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "Hello, how are you?"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "input_audio_buffer.clear",
+      "description": "Clear the input audio buffer. Use this to discard any pending audio data without committing it.",
+      "schema": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `input_audio_buffer.clear`."
+          }
+        }
+      },
+      "example": {
+        "type": "input_audio_buffer.clear"
+      }
+    },
+    {
+      "type": "conversation.item.delete",
+      "description": "Delete a conversation item by ID. The server confirms deletion with a `conversation.item.deleted` event.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "item_id"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `conversation.item.delete`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "The ID of the conversation item to delete."
+          }
+        }
+      },
+      "example": {
+        "type": "conversation.item.delete",
+        "item_id": "msg_003"
+      }
+    },
+    {
+      "type": "conversation.item.truncate",
+      "description": "Truncate a previous assistant audio message item. Removes audio and transcript content after the specified duration, keeping only the content up to that point. The server confirms with a `conversation.item.truncated` event.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "item_id", "content_index", "audio_end_ms"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `conversation.item.truncate`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "The ID of the assistant message item to truncate."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part to truncate."
+          },
+          "audio_end_ms": {
+            "type": "integer",
+            "description": "How many milliseconds of audio the client has actually played back before the interruption. Audio and transcript after this point is removed from the conversation context."
+          }
+        }
+      },
+      "example": {
+        "type": "conversation.item.truncate",
+        "item_id": "msg_004",
+        "content_index": 0,
+        "audio_end_ms": 1500
+      }
+    },
+    {
+      "type": "response.create",
+      "description": "Request the server to create a new assistant response. This is handled automatically when using server-side VAD.",
+      "schema": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `response.create`."
+          },
+          "response": {
+            "type": "object",
+            "description": "Optional response configuration.",
+            "properties": {
+              "modalities": {
+                "type": ["array", "null"],
+                "items": {
+                  "type": "string",
+                  "enum": ["text", "audio"]
+                },
+                "description": "Requested output modalities."
+              },
+              "instructions": {
+                "type": ["string", "null"],
+                "description": "Per-response system prompt override. When set, this replaces the session-level `instructions` for this response only — subsequent responses revert to the session instructions. Useful for injecting dynamic context or changing behavior for a single turn without updating the session."
+              },
+              "metadata": {
+                "type": ["object", "null"],
+                "description": "Developer-provided key-value pairs attached to this response, echoed back on `response.created` and `response.done`. Useful for correlating responses with what triggered them. Up to 16 pairs; keys up to 64 characters, string values up to 512 characters."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "type": "response.create",
+        "response": {
+          "metadata": { "my_trigger_id": "btn-checkout-42" }
+        }
+      }
+    },
+    {
+      "type": "response.cancel",
+      "description": "Cancel an in-progress response. In VAD mode, interruptions are automatic — use this for manual cancel in non-VAD mode.",
+      "schema": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Must be `response.cancel`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "Optional. The ID of the response to cancel. If not provided, cancels the current in-progress response."
+          }
+        }
+      },
+      "example": {
+        "type": "response.cancel"
+      }
+    }
+  ],
+  "serverMessages": [
+    {
+      "type": "session.created",
+      "description": "Sent automatically on WebSocket connection. Contains the session configuration.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `session.created`."
+          },
+          "session": {
+            "type": "object",
+            "description": "The session configuration.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique session identifier."
+              },
+              "object": {
+                "type": "string",
+                "enum": ["realtime.session"],
+                "description": "Always `realtime.session`."
+              },
+              "model": {
+                "type": "string",
+                "description": "The model used for this session."
+              },
+              "instructions": {
+                "type": "string",
+                "description": "System prompt for the voice agent."
+              },
+              "reasoning": {
+                "type": "object",
+                "description": "Reasoning settings for the session when supported by the selected model.",
+                "properties": {
+                  "effort": {
+                    "type": "string",
+                    "enum": ["high", "none"],
+                    "default": "high",
+                    "description": "Reasoning setting for the session when supported by the selected model. Defaults to `high`."
+                  }
+                }
+              },
+              "voice": {
+                "type": "string",
+                "description": "Voice identifier. Use a built-in voice (e.g. Eve, Ara) or a custom voice ID."
+              },
+              "modalities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["text", "audio"]
+                },
+                "description": "Enabled output modalities."
+              },
+              "turn_detection": {
+                "type": "object",
+                "description": "Turn detection configuration.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "`server_vad` or `null`."
+                  }
+                }
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Configured tools."
+              },
+              "replace": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "Spoken-text find-and-replace map currently applied to the session (see `session.update`)."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_001",
+        "type": "session.created",
+        "session": {
+          "id": "sess_001",
+          "object": "realtime.session",
+          "model": "grok-voice-latest"
+        }
+      }
+    },
+    {
+      "type": "conversation.created",
+      "description": "The first message on connection. Notifies the client that a conversation session has been created.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `conversation.created`."
+          },
+          "conversation": {
+            "type": "object",
+            "description": "The conversation object.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique conversation identifier."
+              },
+              "object": {
+                "type": "string",
+                "enum": ["realtime.conversation"],
+                "description": "Always `realtime.conversation`."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_9101",
+        "type": "conversation.created",
+        "conversation": {
+          "id": "conv_001",
+          "object": "realtime.conversation"
+        }
+      }
+    },
+    {
+      "type": "session.updated",
+      "description": "Acknowledges the client's session.update message that the session has been configured.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `session.updated`."
+          },
+          "session": {
+            "type": "object",
+            "description": "The updated session configuration.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique session identifier."
+              },
+              "object": {
+                "type": "string",
+                "enum": ["realtime.session"],
+                "description": "Always `realtime.session`."
+              },
+              "model": {
+                "type": "string",
+                "description": "The model used for this session."
+              },
+              "instructions": {
+                "type": "string",
+                "description": "System prompt for the voice agent."
+              },
+              "voice": {
+                "type": "string",
+                "description": "Voice identifier. Use a built-in voice (e.g. Eve, Ara) or a custom voice ID."
+              },
+              "modalities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["text", "audio"]
+                },
+                "description": "Enabled output modalities."
+              },
+              "turn_detection": {
+                "type": "object",
+                "description": "Turn detection configuration.",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "`server_vad` for automatic detection, or `null` for manual turns."
+                  }
+                }
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Configured tools."
+              },
+              "replace": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "description": "The applied spoken-text find-and-replace map, echoed back from the client's `session.update` (see `session.update`)."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_123",
+        "type": "session.updated",
+        "session": {
+          "model": "grok-voice-latest",
+          "instructions": "You are a helpful assistant.",
+          "voice": "Eve",
+          "replace": { "Acme Mobile": "Acme Mobull" },
+          "turn_detection": {
+            "type": "server_vad"
+          }
+        }
+      }
+    },
+    {
+      "type": "input_audio_buffer.speech_started",
+      "description": "Notifies that the server's VAD detected the start of speech. Only available with server_vad turn detection.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `input_audio_buffer.speech_started`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the associated message item."
+          },
+          "audio_start_ms": {
+            "type": "integer",
+            "description": "Millisecond offset in the audio buffer where speech was detected."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_1516",
+        "type": "input_audio_buffer.speech_started",
+        "item_id": "msg_003"
+      }
+    },
+    {
+      "type": "input_audio_buffer.speech_stopped",
+      "description": "Notifies that the server's VAD detected the end of speech. Only available with server_vad turn detection.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `input_audio_buffer.speech_stopped`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the associated message item."
+          },
+          "audio_end_ms": {
+            "type": "integer",
+            "description": "Millisecond offset in the audio buffer where speech ended."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_1516",
+        "type": "input_audio_buffer.speech_stopped",
+        "item_id": "msg_003"
+      }
+    },
+    {
+      "type": "input_audio_buffer.committed",
+      "description": "Input audio buffer has been committed as a user message.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `input_audio_buffer.committed`."
+          },
+          "previous_item_id": {
+            "type": "string",
+            "description": "ID of the preceding conversation item."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the newly created user message item."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_1121",
+        "type": "input_audio_buffer.committed",
+        "previous_item_id": "msg_001",
+        "item_id": "msg_002"
+      }
+    },
+    {
+      "type": "input_audio_buffer.timeout_triggered",
+      "description": "The `turn_detection.idle_timeout_ms` idle timer fired: no user speech was detected for the configured duration after the assistant finished responding. The server commits a silent user turn and generates a proactive check-in.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `input_audio_buffer.timeout_triggered`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the user item committed for this idle-timeout turn."
+          },
+          "previous_item_id": {
+            "type": ["string", "null"],
+            "description": "ID of the preceding conversation item, or null."
+          },
+          "audio_start_ms": {
+            "type": "integer",
+            "description": "Cumulative offset (ms) from the start of audio written to the input buffer marking the beginning of the idle stretch."
+          },
+          "audio_end_ms": {
+            "type": "integer",
+            "description": "Cumulative offset (ms) at which the idle timer fired. `audio_end_ms - audio_start_ms` is approximately the configured `idle_timeout_ms`."
+          }
+        }
+      },
+      "example": {
+        "event_id": "e4d0d1b6-aebc-49ec-bb3b-66122daa89f1",
+        "type": "input_audio_buffer.timeout_triggered",
+        "item_id": "f1bfca0c-169e-4752-8b8a-b52abde3ddb6",
+        "previous_item_id": null,
+        "audio_start_ms": 39100,
+        "audio_end_ms": 49300
+      }
+    },
+    {
+      "type": "input_audio_buffer.cleared",
+      "description": "Confirms the input audio buffer has been cleared.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `input_audio_buffer.cleared`."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_1122",
+        "type": "input_audio_buffer.cleared"
+      }
+    },
+    {
+      "type": "conversation.item.deleted",
+      "description": "Confirms a conversation item has been deleted.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `conversation.item.deleted`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the deleted item."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_1920",
+        "type": "conversation.item.deleted",
+        "item_id": "msg_003"
+      }
+    },
+    {
+      "type": "conversation.item.added",
+      "description": "A new user or assistant message has been added to the conversation history.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `conversation.item.added`."
+          },
+          "previous_item_id": {
+            "type": "string",
+            "description": "ID of the preceding item in conversation history."
+          },
+          "item": {
+            "description": "The conversation item that was added.",
+            "oneOf": [
+              {
+                "type": "object",
+                "title": "Message",
+                "description": "A text or audio message from a user or assistant.",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Unique item identifier."
+                  },
+                  "object": {
+                    "type": "string",
+                    "enum": ["realtime.item"],
+                    "description": "Always `realtime.item`."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["message"],
+                    "description": "Always `message`."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["completed", "in_progress", "cancelled", "incomplete"],
+                    "description": "Processing status of the item."
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["user", "assistant", "system"],
+                    "description": "Role of the message sender."
+                  },
+                  "content": {
+                    "type": "array",
+                    "description": "Array of content parts.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["input_audio", "input_text", "text", "audio"],
+                          "description": "Content type."
+                        },
+                        "transcript": {
+                          "type": "string",
+                          "description": "Text transcript of audio content."
+                        },
+                        "text": {
+                          "type": "string",
+                          "description": "Text content."
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "title": "Function call",
+                "description": "A function call initiated by the assistant.",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Unique item identifier."
+                  },
+                  "object": {
+                    "type": "string",
+                    "enum": ["realtime.item"],
+                    "description": "Always `realtime.item`."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["function_call"],
+                    "description": "Always `function_call`."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["completed", "in_progress", "cancelled", "incomplete"],
+                    "description": "Processing status."
+                  },
+                  "call_id": {
+                    "type": "string",
+                    "description": "Unique function call identifier."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Name of the function being called."
+                  },
+                  "arguments": {
+                    "type": "string",
+                    "description": "JSON string of the function arguments."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "title": "Function call output",
+                "description": "The result of a function call, provided by the client.",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Unique item identifier."
+                  },
+                  "object": {
+                    "type": "string",
+                    "enum": ["realtime.item"],
+                    "description": "Always `realtime.item`."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["function_call_output"],
+                    "description": "Always `function_call_output`."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["completed", "in_progress"],
+                    "description": "Processing status."
+                  },
+                  "call_id": {
+                    "type": "string",
+                    "description": "The function call identifier this output is for."
+                  },
+                  "output": {
+                    "type": "string",
+                    "description": "JSON string of the function result."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_1920",
+        "type": "conversation.item.added",
+        "previous_item_id": "msg_002",
+        "item": {
+          "id": "msg_003",
+          "object": "realtime.item",
+          "type": "message",
+          "status": "completed",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_audio",
+              "transcript": "hello how are you"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "conversation.item.truncated",
+      "description": "Confirms that a conversation item has been truncated. Sent in response to a `conversation.item.truncate` client event.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `conversation.item.truncated`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the truncated item."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part that was truncated."
+          },
+          "audio_end_ms": {
+            "type": "integer",
+            "description": "Duration in milliseconds of the remaining audio."
+          },
+          "transcript": {
+            "type": "string",
+            "description": "The truncated transcript text (up to the truncation point). Useful for updating the displayed transcript in the client UI after an interruption. xAI extension — not part of the OpenAI Realtime API."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_2021",
+        "type": "conversation.item.truncated",
+        "item_id": "msg_004",
+        "content_index": 0,
+        "audio_end_ms": 1500,
+        "transcript": "Hello! I'm doing well, thank you for"
+      }
+    },
+    {
+      "type": "conversation.item.input_audio_transcription.completed",
+      "description": "Audio transcription for the user's input has been completed.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `conversation.item.input_audio_transcription.completed`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the conversation item whose audio was transcribed."
+          },
+          "transcript": {
+            "type": "string",
+            "description": "The transcribed text."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_2122",
+        "type": "conversation.item.input_audio_transcription.completed",
+        "item_id": "msg_003",
+        "transcript": "Hello, how are you?"
+      }
+    },
+    {
+      "type": "conversation.item.input_audio_transcription.updated",
+      "description": "Streaming transcription update for the user's audio input. Emitted as the user speaks, providing the cumulative transcript so far before the final `completed` event. Note that this is the cumulative transcript which may have corrections to previous updated transcripts — this is different from a transcript delta. Only emitted when `audio.input.transcription.model` is set to `grok-transcribe` in the session configuration. Useful for displaying live captions.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `conversation.item.input_audio_transcription.updated`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the conversation item whose audio is being transcribed."
+          },
+          "transcript": {
+            "type": "string",
+            "description": "The cumulative transcript text so far. May contain corrections to text from previous `updated` events."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_2123",
+        "type": "conversation.item.input_audio_transcription.updated",
+        "item_id": "msg_003",
+        "transcript": "Hello, how are"
+      }
+    },
+    {
+      "type": "input_audio_buffer.dtmf_event_received",
+      "description": "A DTMF tone (phone keypress) was detected on a SIP session. SIP only — not emitted on direct WebSocket connections. Digits are buffered server-side and flushed as a text message to the model on `#` key, 2.5s idle, or when the user begins speaking.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `input_audio_buffer.dtmf_event_received`."
+          },
+          "event": {
+            "type": "string",
+            "description": "The DTMF digit or symbol (`0`–`9`, `*`, `#`)."
+          },
+          "received_at": {
+            "type": "integer",
+            "description": "Unix timestamp (seconds) when the tone was received."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_dtmf01",
+        "type": "input_audio_buffer.dtmf_event_received",
+        "event": "5",
+        "received_at": 1730000000
+      }
+    },
+    {
+      "type": "response.created",
+      "description": "A new assistant response turn is in progress. Audio deltas from this turn share the same response_id.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.created`."
+          },
+          "response": {
+            "type": "object",
+            "description": "The response object.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique response identifier."
+              },
+              "object": {
+                "type": "string",
+                "enum": ["realtime.response"],
+                "description": "Always `realtime.response`."
+              },
+              "status": {
+                "type": "string",
+                "enum": ["in_progress", "completed", "cancelled", "incomplete"],
+                "description": "Status of the response. Initially `in_progress`."
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                },
+                "description": "Array of output items (initially empty, populated as items are added)."
+              },
+              "metadata": {
+                "type": ["object", "null"],
+                "description": "Developer-provided key-value pairs from `response.create`, echoed verbatim. `null` for responses not triggered by a client `response.create` (e.g. automatic responses in server-side VAD mode)."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_2930",
+        "type": "response.created",
+        "response": {
+          "id": "resp_001",
+          "object": "realtime.response",
+          "status": "in_progress",
+          "output": [],
+          "metadata": { "my_trigger_id": "btn-checkout-42" }
+        }
+      }
+    },
+    {
+      "type": "response.output_item.added",
+      "description": "A new assistant response item is added to the message history.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.output_item.added`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response this item belongs to."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "item": {
+            "description": "The output item that was added.",
+            "oneOf": [
+              {
+                "type": "object",
+                "title": "Message",
+                "description": "An assistant text or audio message.",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Unique item identifier."
+                  },
+                  "object": {
+                    "type": "string",
+                    "enum": ["realtime.item"],
+                    "description": "Always `realtime.item`."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["message"],
+                    "description": "Always `message`."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["in_progress", "completed", "cancelled", "incomplete"],
+                    "description": "Processing status."
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["assistant"],
+                    "description": "Always `assistant`."
+                  },
+                  "content": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Content parts (populated as content streams in)."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "title": "Function call",
+                "description": "A function call the assistant wants to invoke.",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Unique item identifier."
+                  },
+                  "object": {
+                    "type": "string",
+                    "enum": ["realtime.item"],
+                    "description": "Always `realtime.item`."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["function_call"],
+                    "description": "Always `function_call`."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["in_progress", "completed", "cancelled", "incomplete"],
+                    "description": "Processing status."
+                  },
+                  "call_id": {
+                    "type": "string",
+                    "description": "Unique function call identifier. Use this in `conversation.item.create` with `function_call_output`."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Name of the function being called."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_3334",
+        "type": "response.output_item.added",
+        "response_id": "resp_001",
+        "output_index": 0,
+        "item": {
+          "id": "msg_007",
+          "object": "realtime.item",
+          "type": "message",
+          "status": "in_progress",
+          "role": "assistant",
+          "content": []
+        }
+      }
+    },
+    {
+      "type": "response.output_item.done",
+      "description": "An output item is complete.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.output_item.done`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response this item belongs to."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "item": {
+            "description": "The completed output item.",
+            "oneOf": [
+              {
+                "type": "object",
+                "title": "Message",
+                "description": "A completed assistant text or audio message.",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Unique item identifier."
+                  },
+                  "object": {
+                    "type": "string",
+                    "enum": ["realtime.item"],
+                    "description": "Always `realtime.item`."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["message"],
+                    "description": "Always `message`."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["completed", "cancelled", "incomplete"],
+                    "description": "Final status."
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["assistant"],
+                    "description": "Always `assistant`."
+                  },
+                  "content": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Content parts for this item."
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "title": "Function call",
+                "description": "A completed function call with final arguments.",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Unique item identifier."
+                  },
+                  "object": {
+                    "type": "string",
+                    "enum": ["realtime.item"],
+                    "description": "Always `realtime.item`."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["function_call"],
+                    "description": "Always `function_call`."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["completed", "cancelled", "incomplete"],
+                    "description": "Final status."
+                  },
+                  "call_id": {
+                    "type": "string",
+                    "description": "Unique function call identifier. Use this in `conversation.item.create` with `function_call_output`."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Name of the function to call."
+                  },
+                  "arguments": {
+                    "type": "string",
+                    "description": "JSON string of the complete function arguments."
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_3335",
+        "type": "response.output_item.done",
+        "response_id": "resp_001",
+        "output_index": 0,
+        "item": {
+          "id": "msg_007",
+          "object": "realtime.item",
+          "type": "message",
+          "status": "completed",
+          "role": "assistant",
+          "content": []
+        }
+      }
+    },
+    {
+      "type": "response.content_part.added",
+      "description": "A content part starts within an output item.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.content_part.added`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the output item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part within the item."
+          },
+          "part": {
+            "type": "object",
+            "description": "The content part.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["audio", "text"],
+                "description": "Content type. `audio` for audio responses, `text` for text responses."
+              },
+              "transcript": {
+                "type": "string",
+                "description": "Transcript text, if applicable."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_3336",
+        "type": "response.content_part.added",
+        "response_id": "resp_001",
+        "item_id": "msg_007",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "audio"
+        }
+      }
+    },
+    {
+      "type": "response.content_part.done",
+      "description": "A content part finishes.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.content_part.done`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the output item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part within the item."
+          },
+          "part": {
+            "type": "object",
+            "description": "The completed content part.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["audio", "text"],
+                "description": "Content type. `audio` for audio responses, `text` for text responses."
+              },
+              "transcript": {
+                "type": "string",
+                "description": "Full transcript of the content part."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_3337",
+        "type": "response.content_part.done",
+        "response_id": "resp_001",
+        "item_id": "msg_007",
+        "output_index": 0,
+        "content_index": 0,
+        "part": {
+          "type": "audio"
+        }
+      }
+    },
+    {
+      "type": "response.output_audio_transcript.delta",
+      "description": "Streaming text transcript delta of the assistant's audio response.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.output_audio_transcript.delta`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the output item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part within the item."
+          },
+          "delta": {
+            "type": "string",
+            "description": "Text transcript fragment."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_4950",
+        "type": "response.output_audio_transcript.delta",
+        "response_id": "resp_001",
+        "item_id": "msg_008",
+        "delta": "Hello! I'm doing"
+      }
+    },
+    {
+      "type": "response.output_audio_transcript.done",
+      "description": "The audio transcript for this assistant turn has finished generating.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.output_audio_transcript.done`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the output item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part within the item."
+          },
+          "transcript": {
+            "type": "string",
+            "description": "The complete transcript text."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_5152",
+        "type": "response.output_audio_transcript.done",
+        "response_id": "resp_001",
+        "item_id": "msg_008"
+      }
+    },
+    {
+      "type": "response.output_audio.delta",
+      "description": "Streaming base64-encoded audio delta of the assistant's response.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.output_audio.delta`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the output item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part within the item."
+          },
+          "delta": {
+            "type": "string",
+            "description": "Base64-encoded audio data chunk."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_4950",
+        "type": "response.output_audio.delta",
+        "response_id": "resp_001",
+        "item_id": "msg_008",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "<Base64EncodedAudioDelta>"
+      }
+    },
+    {
+      "type": "response.output_audio.done",
+      "description": "Audio generation for this assistant turn has finished.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.output_audio.done`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the output item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part within the item."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_5152",
+        "type": "response.output_audio.done",
+        "response_id": "resp_001",
+        "item_id": "msg_008"
+      }
+    },
+    {
+      "type": "response.text.delta",
+      "description": "Text-mode output delta (when using text modality).",
+      "schema": {
+        "type": "object",
+        "required": ["type", "response_id", "item_id", "delta"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Always `response.text.delta`.",
+            "enum": ["response.text.delta"]
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "The response ID."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "The item ID."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part."
+          },
+          "delta": {
+            "type": "string",
+            "description": "The text delta."
+          }
+        }
+      },
+      "example": {
+        "type": "response.text.delta",
+        "event_id": "event_4950",
+        "response_id": "resp_001",
+        "item_id": "msg_008",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "Text response..."
+      }
+    },
+    {
+      "type": "response.output_text.delta",
+      "description": "Text-mode output delta using the OpenAI GA event name. Functionally identical to `response.text.delta`. Clients should handle both event names for maximum compatibility.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "response_id", "item_id", "delta"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Always `response.output_text.delta`.",
+            "enum": ["response.output_text.delta"]
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "The response ID."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "The item ID."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item."
+          },
+          "content_index": {
+            "type": "integer",
+            "description": "Index of the content part."
+          },
+          "delta": {
+            "type": "string",
+            "description": "The text delta."
+          }
+        }
+      },
+      "example": {
+        "type": "response.output_text.delta",
+        "event_id": "event_4951",
+        "response_id": "resp_001",
+        "item_id": "msg_008",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "Text response..."
+      }
+    },
+    {
+      "type": "response.function_call_arguments.delta",
+      "description": "Streaming function call arguments.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.function_call_arguments.delta`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the function call item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "call_id": {
+            "type": "string",
+            "description": "Unique identifier for this function call. Use in `conversation.item.create` with `function_call_output`."
+          },
+          "delta": {
+            "type": "string",
+            "description": "Partial JSON arguments string."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_fc00",
+        "type": "response.function_call_arguments.delta",
+        "response_id": "resp_001",
+        "item_id": "msg_009",
+        "output_index": 0,
+        "call_id": "call_001",
+        "delta": "{\"location\":"
+      }
+    },
+    {
+      "type": "response.function_call_arguments.done",
+      "description": "A function call has been triggered with complete arguments. Your code should execute the function and return results via `conversation.item.create` with type `function_call_output`.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.function_call_arguments.done`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the function call item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "call_id": {
+            "type": "string",
+            "description": "Unique ID for this function call. Pass this as `call_id` in the `conversation.item.create` event with type `function_call_output`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the function to call."
+          },
+          "arguments": {
+            "type": "string",
+            "description": "JSON string of the function arguments."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_fc01",
+        "type": "response.function_call_arguments.done",
+        "response_id": "resp_001",
+        "item_id": "msg_009",
+        "output_index": 0,
+        "call_id": "call_001",
+        "name": "get_weather",
+        "arguments": "{\"location\": \"San Francisco\"}"
+      }
+    },
+    {
+      "type": "mcp_list_tools.in_progress",
+      "description": "MCP tool discovery has started.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `mcp_list_tools.in_progress`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the MCP list tools item."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_mcp01",
+        "type": "mcp_list_tools.in_progress",
+        "item_id": "item_456"
+      }
+    },
+    {
+      "type": "mcp_list_tools.completed",
+      "description": "MCP tool discovery succeeded.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `mcp_list_tools.completed`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the MCP list tools item."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_mcp02",
+        "type": "mcp_list_tools.completed",
+        "item_id": "item_456"
+      }
+    },
+    {
+      "type": "mcp_list_tools.failed",
+      "description": "MCP tool discovery failed.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `mcp_list_tools.failed`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the MCP list tools item."
+          },
+          "error": {
+            "type": "object",
+            "description": "Error details.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Error type, e.g., `connection_error`."
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable error message."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_mcp03",
+        "type": "mcp_list_tools.failed",
+        "item_id": "item_456",
+        "error": {
+          "type": "connection_error",
+          "message": "Failed to connect to MCP server"
+        }
+      }
+    },
+    {
+      "type": "response.mcp_call_arguments.delta",
+      "description": "MCP call arguments streaming.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.mcp_call_arguments.delta`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the MCP call item."
+          },
+          "call_id": {
+            "type": "string",
+            "description": "Unique identifier for this MCP call."
+          },
+          "delta": {
+            "type": "string",
+            "description": "Partial JSON arguments string."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_mcp10",
+        "type": "response.mcp_call_arguments.delta",
+        "response_id": "resp_001",
+        "item_id": "item_789",
+        "call_id": "call_001",
+        "delta": "{\"query\":"
+      }
+    },
+    {
+      "type": "response.mcp_call_arguments.done",
+      "description": "MCP call arguments finalized.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.mcp_call_arguments.done`."
+          },
+          "response_id": {
+            "type": "string",
+            "description": "ID of the response."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the MCP call item."
+          },
+          "call_id": {
+            "type": "string",
+            "description": "Unique identifier for this MCP call."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the MCP tool to call."
+          },
+          "arguments": {
+            "type": "string",
+            "description": "JSON string of the tool arguments."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_mcp11",
+        "type": "response.mcp_call_arguments.done",
+        "response_id": "resp_001",
+        "item_id": "item_789",
+        "call_id": "call_001",
+        "name": "search_documents",
+        "arguments": "{\"query\": \"quarterly report\"}"
+      }
+    },
+    {
+      "type": "response.mcp_call.in_progress",
+      "description": "MCP server HTTP call starting.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.mcp_call.in_progress`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the MCP call item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_mcp12",
+        "type": "response.mcp_call.in_progress",
+        "item_id": "item_789",
+        "output_index": 0
+      }
+    },
+    {
+      "type": "response.mcp_call.completed",
+      "description": "MCP tool execution succeeded.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.mcp_call.completed`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the MCP call item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_mcp13",
+        "type": "response.mcp_call.completed",
+        "item_id": "item_789",
+        "output_index": 0
+      }
+    },
+    {
+      "type": "response.mcp_call.failed",
+      "description": "MCP tool execution failed.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.mcp_call.failed`."
+          },
+          "item_id": {
+            "type": "string",
+            "description": "ID of the MCP call item."
+          },
+          "output_index": {
+            "type": "integer",
+            "description": "Index of the output item in the response."
+          },
+          "error": {
+            "type": "object",
+            "description": "Error details.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Error type, e.g., `tool_execution_error`."
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable error message."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_mcp14",
+        "type": "response.mcp_call.failed",
+        "item_id": "item_789",
+        "output_index": 0,
+        "error": {
+          "type": "tool_execution_error",
+          "message": "Tool timed out"
+        }
+      }
+    },
+    {
+      "type": "response.done",
+      "description": "The assistant's response is completed. Sent after all audio and transcript deltas. Ready for the client to add a new conversation item.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `response.done`."
+          },
+          "response": {
+            "type": "object",
+            "description": "The completed response object.",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique response identifier."
+              },
+              "object": {
+                "type": "string",
+                "enum": ["realtime.response"],
+                "description": "Always `realtime.response`."
+              },
+              "status": {
+                "type": "string",
+                "enum": ["completed", "cancelled", "incomplete"],
+                "description": "Final status of the response. `completed` on success, `cancelled` if interrupted, `incomplete` if cut short."
+              },
+              "usage": {
+                "type": "object",
+                "description": "Token usage statistics for the response.",
+                "properties": {
+                  "input_tokens": {
+                    "type": "integer",
+                    "description": "Total input tokens consumed."
+                  },
+                  "output_tokens": {
+                    "type": "integer",
+                    "description": "Total output tokens generated."
+                  },
+                  "total_tokens": {
+                    "type": "integer",
+                    "description": "Sum of input and output tokens."
+                  }
+                }
+              },
+              "metadata": {
+                "type": ["object", "null"],
+                "description": "Developer-provided key-value pairs from `response.create`, echoed verbatim — including when the response was cancelled or interrupted. `null` for responses not triggered by a client `response.create` (e.g. automatic responses in server-side VAD mode)."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_3132",
+        "type": "response.done",
+        "response": {
+          "id": "resp_001",
+          "object": "realtime.response",
+          "status": "completed",
+          "metadata": { "my_trigger_id": "btn-checkout-42" }
+        }
+      }
+    },
+    {
+      "type": "error",
+      "description": "Sent when an error occurs. Contains error code and message. Most errors are recoverable and the session stays open.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "description": "Unique event identifier."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `error`."
+          },
+          "error": {
+            "type": "object",
+            "description": "Error details.",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_request_error",
+                  "invalid_event",
+                  "internal_error",
+                  "timeout",
+                  "max_duration"
+                ],
+                "description": "Error type. `invalid_request_error` for malformed requests, `invalid_event` for unsupported event types, `internal_error` for server failures, `timeout` for inactivity timeout, `max_duration` for exceeding maximum conversation duration."
+              },
+              "code": {
+                "type": "string",
+                "description": "Error code string (same as type)."
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable error message."
+              },
+              "param": {
+                "type": "string",
+                "description": "Parameter that caused the error, if applicable."
+              },
+              "event_id": {
+                "type": "string",
+                "description": "ID of the client event that caused the error, if applicable."
+              }
+            }
+          }
+        }
+      },
+      "example": {
+        "event_id": "event_err01",
+        "type": "error",
+        "error": {
+          "type": "invalid_request_error",
+          "code": "invalid_audio_format",
+          "message": "Audio format not supported. Use audio/pcm, audio/pcmu, or audio/pcma."
+        }
+      }
+    }
+  ],
+  "exampleFlow": [
+    {
+      "direction": "server",
+      "type": "session.created"
+    },
+    {
+      "direction": "server",
+      "type": "conversation.created"
+    },
+    {
+      "direction": "client",
+      "type": "session.update"
+    },
+    {
+      "direction": "server",
+      "type": "session.updated"
+    },
+    {
+      "direction": "client",
+      "type": "conversation.item.create"
+    },
+    {
+      "direction": "server",
+      "type": "conversation.item.added"
+    },
+    {
+      "direction": "client",
+      "type": "response.create"
+    },
+    {
+      "direction": "server",
+      "type": "response.created"
+    },
+    {
+      "direction": "server",
+      "type": "response.output_item.added"
+    },
+    {
+      "direction": "server",
+      "type": "response.content_part.added"
+    },
+    {
+      "direction": "server",
+      "type": "response.output_audio.delta"
+    },
+    {
+      "direction": "server",
+      "type": "response.output_audio_transcript.delta"
+    },
+    {
+      "direction": "server",
+      "type": "response.output_audio.done"
+    },
+    {
+      "direction": "server",
+      "type": "response.output_audio_transcript.done"
+    },
+    {
+      "direction": "server",
+      "type": "response.content_part.done"
+    },
+    {
+      "direction": "server",
+      "type": "response.output_item.done"
+    },
+    {
+      "direction": "server",
+      "type": "response.done"
+    }
+  ]
+}

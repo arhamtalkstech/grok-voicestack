@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: voicestack
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - app.yaml
+  - telephony.yaml
+  - ingress.yaml

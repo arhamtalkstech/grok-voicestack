@@ -1,0 +1,55 @@
+# Phone-call workers hold a WebSocket per call for its whole duration. A long grace period lets
+# in-flight calls finish during rollouts instead of dropping.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voicestack-telephony
+  labels: {app: voicestack, role: telephony}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels: {app: voicestack, role: telephony}
+  template:
+    metadata:
+      labels: {app: voicestack, role: telephony}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      terminationGracePeriodSeconds: 3600
+      containers:
+        - name: voicestack
+          image: voicestack:latest
+          ports: [{containerPort: 8000, name: http}]
+          env:
+            - {name: ROLE, value: telephony}
+          envFrom:
+            - configMapRef: {name: voicestack}
+            - secretRef: {name: voicestack}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voicestack-telephony
+spec:
+  selector: {app: voicestack, role: telephony}
+  ports: [{port: 80, targetPort: http, name: http}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: voicestack-telephony
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {app: voicestack, role: telephony}

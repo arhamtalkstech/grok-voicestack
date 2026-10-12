@@ -1,0 +1,373 @@
+{
+  "title": "Streaming Speech to Text",
+  "endpoint": "wss://api.x.ai/v1/stt",
+  "description": "Real-time streaming speech-to-text via WebSocket. Stream raw audio as binary frames and receive JSON transcript events as the audio is processed. Configuration is done via query parameters at connection time. The default is grok-voice-transcribe-2.0.",
+
+  "authentication": {
+    "headers": [
+      {
+        "name": "Authorization",
+        "type": "string",
+        "required": true,
+        "description": "Bearer token authentication. Format: `Bearer <your xAI API key>`.",
+        "example": "Bearer $XAI_API_KEY"
+      }
+    ]
+  },
+
+  "queryParameters": [
+    {
+      "name": "sample_rate",
+      "type": "integer",
+      "required": false,
+      "default": 16000,
+      "description": "Audio sample rate in Hz. Supported values: `8000`, `16000`, `22050`, `24000`, `44100`, `48000`. Ignored with `encoding=opus` — Opus packets are sample-rate-agnostic."
+    },
+    {
+      "name": "encoding",
+      "type": "string",
+      "required": false,
+      "default": "pcm",
+      "description": "Audio encoding format. `pcm` — signed 16-bit little-endian (2 bytes/sample). `mulaw` — G.711 µ-law (1 byte/sample). `alaw` — G.711 A-law (1 byte/sample). `opus` — raw Opus packets, one packet per binary WebSocket frame, mono only."
+    },
+    {
+      "name": "interim_results",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "When `true`, the server emits partial transcript events (`is_final=false`) approximately every 500 ms while audio is being processed. When `false` (default), only finalized results are sent."
+    },
+    {
+      "name": "endpointing",
+      "type": "integer",
+      "required": false,
+      "default": 400,
+      "description": "Silence duration in milliseconds before the server fires a `speech_final=true` event, indicating the speaker stopped talking. Range: 0–5000. Set to `0` for no delay (fire on any VAD silence boundary). Default: 400ms."
+    },
+    {
+      "name": "language",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "description": "Language code (e.g. `en`, `fr`, `de`, `ja`). Biases transcription toward that language and selects the formatting rules for `format=true`. See Supported Languages on the Speech to Text page."
+    },
+    {
+      "name": "format",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "When `true`, enables Inverse Text Normalization — spoken-form numbers, currencies, and units are converted to their written form. Requires `language`; available for `ar`, `de`, `en`, `es`, `fr`, `ja`, `pt`, `ru`, `sv`, `vi`, and `zh`."
+    },
+    {
+      "name": "model",
+      "type": "string",
+      "required": false,
+      "default": "grok-voice-transcribe-2.0",
+      "description": "`grok-voice-transcribe-2.0` (default)."
+    },
+    {
+      "name": "multichannel",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "When `true`, enables per-channel transcription for interleaved multichannel audio. Requires `channels` to be set to ≥ 2. Not supported with `encoding=opus`."
+    },
+    {
+      "name": "channels",
+      "type": "integer",
+      "required": false,
+      "default": 1,
+      "description": "Number of interleaved audio channels. Required when `multichannel=true`. Min: 2, Max: 8."
+    },
+    {
+      "name": "diarize",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "When `true`, enables speaker diarization. Words in `transcript.partial` and `transcript.done` events include a `speaker` field (integer) identifying the detected speaker."
+    },
+    {
+      "name": "keyterm",
+      "type": "string (repeatable)",
+      "required": false,
+      "description": "A key term to bias transcription toward (e.g. product names, proper nouns). Repeat the parameter for each term (e.g. `keyterm=Understand+The+Universe`). Max 100 terms, each up to 50 characters."
+    },
+    {
+      "name": "filler_words",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "When `true`, filler words (e.g. `uh`, `um`, `er`) are included in the transcript. When `false` (default), filler words are automatically removed from the transcript text and the `words` array."
+    },
+    {
+      "name": "smart_turn",
+      "type": "number",
+      "required": false,
+      "description": "Enable Smart Turn end-of-turn detection. Set to a confidence threshold between `0.0` and `1.0`. When the model's end-of-turn probability exceeds this threshold at a VAD silence boundary, `speech_final` fires immediately. When confidence is below the threshold, `speech_final` is suppressed and the event is demoted to `chunk_final`. Every `transcript.partial` event includes an `end_of_turn_confidence` field (0.0–1.0) when Smart Turn is enabled. Example: `smart_turn=0.7`."
+    },
+    {
+      "name": "smart_turn_timeout",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum silence duration in milliseconds before forcing `speech_final`, even when the Smart Turn model predicts the speaker hasn't finished. Acts as a safety net to prevent sessions from hanging during extended silence. Only applies when `smart_turn` is enabled. Range: 1–5000. Example: `smart_turn_timeout=3000`."
+    },
+    {
+      "name": "vad_threshold",
+      "type": "number",
+      "required": false,
+      "default": 0.08,
+      "description": "Speech-probability threshold for the voice-activity gate (0.0–1.0). Audio in chunks scoring below the threshold is treated as non-speech and skipped for transcription. Lower values transcribe quieter or noisier speech (e.g. narrowband telephony) but may produce spurious text for background noise; `0` disables the gate entirely. Does not affect endpointing or `speech_final` timing. Default: `0.08`."
+    }
+  ],
+
+  "clientMessages": [
+    {
+      "type": "Binary frame (audio)",
+      "description": "Send raw audio as binary WebSocket frames in the encoding specified by the `encoding` query parameter. Audio should be streamed in real-time-paced chunks (e.g. 100 ms at a time). No base64 encoding — send raw bytes directly. With `encoding=opus`, each binary frame must contain exactly one raw Opus packet — never concatenate packets or split one across frames. An undecodable frame sends an `error` event and closes the session.",
+      "schema": {
+        "type": "string",
+        "format": "binary",
+        "description": "Raw audio bytes in the specified encoding (pcm, mulaw, alaw, or opus)."
+      },
+      "example": "(raw binary audio data)"
+    },
+    {
+      "type": "finalize",
+      "description": "Force the current utterance to finalize as `speech_final` immediately, without waiting for VAD endpointing or Smart Turn. The session stays open so you can continue streaming audio. Accepts `finalize` or `Finalize` as the type value. When `multichannel=true`, optional `channel` (0-based) limits the finalize to that channel; omit `channel` to finalize every channel.",
+      "schema": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["finalize", "Finalize"],
+            "description": "Must be `finalize` or `Finalize`."
+          },
+          "channel": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional 0-based channel index. Only meaningful when `multichannel=true`. When omitted, all channels are finalized."
+          }
+        }
+      },
+      "example": {
+        "type": "Finalize",
+        "channel": 0
+      }
+    },
+    {
+      "type": "audio.done",
+      "description": "Signal that all audio has been sent. The server flushes any remaining buffered audio, emits final transcript events, and sends a `transcript.done` event. The connection closes after `transcript.done`.",
+      "schema": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "audio.done",
+            "description": "Must be `audio.done`."
+          }
+        }
+      },
+      "example": {
+        "type": "audio.done"
+      }
+    }
+  ],
+
+  "serverMessages": [
+    {
+      "type": "transcript.created",
+      "description": "Sent immediately after the WebSocket connection is established and the server is ready to receive audio. **Wait for this event before sending audio** — the server needs to initialize its ASR backend.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "id"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "transcript.created",
+            "description": "Always `transcript.created`."
+          },
+          "id": {
+            "type": "string",
+            "description": "Unique session identifier (UUID)."
+          }
+        }
+      },
+      "example": {
+        "type": "transcript.created",
+        "id": "83f2f6fd-1cd1-4747-bc52-cebddc961c32"
+      }
+    },
+    {
+      "type": "transcript.partial",
+      "description": "A transcript result for a portion of the audio stream. Two boolean fields convey state: interim (`is_final=false`) means text may still change, chunk final (`is_final=true`, `speech_final=false`) means the chunk is locked, and utterance final (`is_final=true`, `speech_final=true`) means the speaker stopped talking.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "text", "words", "is_final", "speech_final", "start", "duration"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "transcript.partial",
+            "description": "Always `transcript.partial`."
+          },
+          "text": {
+            "type": "string",
+            "description": "Transcript text for this chunk."
+          },
+          "words": {
+            "type": "array",
+            "description": "Word-level details with timestamps and confidence scores.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": { "type": "string", "description": "The word text." },
+                "start": {
+                  "type": "number",
+                  "description": "Word start time in seconds (2 d.p.)."
+                },
+                "end": { "type": "number", "description": "Word end time in seconds (2 d.p.)." },
+                "confidence": {
+                  "type": "number",
+                  "description": "Confidence score (0.0–1.0). Omitted when 0."
+                },
+                "speaker": {
+                  "type": "integer",
+                  "description": "Speaker index (0-based). Only present when `diarize=true`."
+                }
+              }
+            }
+          },
+          "is_final": {
+            "type": "boolean",
+            "description": "Chunk-level finality. `false` = partial (text may change). `true` = chunk fully transcribed (text locked)."
+          },
+          "speech_final": {
+            "type": "boolean",
+            "description": "Utterance-level finality. `true` = speaker stopped talking (VAD endpointing). Only meaningful when `is_final=true`."
+          },
+          "start": {
+            "type": "number",
+            "description": "Start position in the audio stream (seconds from stream start, 2 d.p.)."
+          },
+          "duration": {
+            "type": "number",
+            "description": "Duration of audio covered by this result (seconds, 2 d.p.)."
+          },
+          "channel_index": {
+            "type": "integer",
+            "description": "Channel index. Only present when `multichannel=true`."
+          },
+          "end_of_turn_confidence": {
+            "type": "number",
+            "description": "End-of-turn confidence from the Smart Turn model (0.0–1.0). Only present when `smart_turn` is enabled. Higher values indicate the speaker has likely finished their thought. During active speech the value is `0.0`; at silence boundaries the model evaluates accumulated audio and publishes a confidence score."
+          }
+        }
+      },
+      "example": {
+        "type": "transcript.partial",
+        "text": "The balance is $167,983.15.",
+        "words": [
+          { "text": "The", "start": 0.24, "end": 0.48, "confidence": 0.95 },
+          { "text": "balance", "start": 0.48, "end": 0.96, "confidence": 0.92 },
+          { "text": "is", "start": 0.96, "end": 1.12, "confidence": 0.98 },
+          { "text": "$167,983.15.", "start": 1.12, "end": 3.2, "confidence": 0.89 }
+        ],
+        "is_final": true,
+        "speech_final": false,
+        "start": 0.0,
+        "duration": 3.2
+      }
+    },
+    {
+      "type": "transcript.done",
+      "description": "Final transcript after `audio.done`. `duration` always present. One per channel when `multichannel=true`. Connection closes after this event.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "text", "words", "duration"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "transcript.done",
+            "description": "Always `transcript.done`."
+          },
+          "text": {
+            "type": "string",
+            "description": "Final transcript text."
+          },
+          "words": {
+            "type": "array",
+            "description": "Word-level details for the final transcript.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": { "type": "string" },
+                "start": { "type": "number" },
+                "end": { "type": "number" },
+                "confidence": { "type": "number" },
+                "speaker": {
+                  "type": "integer",
+                  "description": "Speaker index (0-based). Only present when `diarize=true`."
+                }
+              }
+            }
+          },
+          "duration": {
+            "type": "number",
+            "description": "Total audio duration processed (seconds, 2 d.p.)."
+          },
+          "channel_index": {
+            "type": "integer",
+            "description": "Channel index. Only present when `multichannel=true`."
+          }
+        }
+      },
+      "example": {
+        "type": "transcript.done",
+        "text": "",
+        "words": [],
+        "duration": 6.43
+      }
+    },
+    {
+      "type": "error",
+      "description": "An error occurred during the session. Most errors (pipeline failures, stream timeouts, undecodable audio frames) close the connection. Only client message parse errors keep the connection open.",
+      "schema": {
+        "type": "object",
+        "required": ["type", "message"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "error",
+            "description": "Always `error`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error description."
+          }
+        }
+      },
+      "example": {
+        "type": "error",
+        "message": "Invalid message: expected {\"type\": \"audio.done\"}"
+      }
+    }
+  ],
+
+  "exampleFlow": [
+    { "direction": "server", "type": "transcript.created" },
+    { "direction": "client", "type": "Binary frame (audio)" },
+    { "direction": "client", "type": "Binary frame (audio)" },
+    { "direction": "server", "type": "transcript.partial", "label": "interim (is_final=false)" },
+    { "direction": "client", "type": "Binary frame (audio)" },
+    { "direction": "server", "type": "transcript.partial", "label": "chunk final (is_final=true)" },
+    { "direction": "client", "type": "Binary frame (audio)" },
+    {
+      "direction": "server",
+      "type": "transcript.partial",
+      "label": "utterance final (speech_final=true)"
+    },
+    { "direction": "client", "type": "audio.done" },
+    { "direction": "server", "type": "transcript.done" }
+  ]
+}

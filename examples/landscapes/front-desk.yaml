@@ -1,0 +1,188 @@
+# Example landscape: a developer help line for people building on the xAI API.
+# Load it with `voicestack apply -f examples/landscapes/front-desk.yaml` or Landscape → Import.
+# Every tool here calls a real, keyless public service. The transfer destination is an
+# example SIP URI: replace it with your own line before taking real calls.
+version: 1
+
+tools:
+  - name: look_up_repository
+    kind: http
+    description: Look up a public GitHub repository and return its description, primary language, star count, and when it was last updated.
+    parameters:
+      type: object
+      properties:
+        owner: {type: string, description: "Repository owner, for example xai-org"}
+        repo: {type: string, description: "Repository name, for example xai-sdk-python"}
+      required: [owner, repo]
+    config:
+      method: GET
+      url: https://api.github.com/repos/{owner}/{repo}
+      headers: {Accept: application/vnd.github+json, User-Agent: voice-stack-example}
+      send_args_as: none
+      response_fields:
+        full_name: $.full_name
+        description: $.description
+        language: $.language
+        stars: $.stargazers_count
+        last_push: $.pushed_at
+        url: $.html_url
+      max_chars: 1200
+      timeout_s: 10
+    preamble: Let me pull up that repository.
+    requires_confirmation: false
+    enabled: true
+
+mcp_servers:
+  - label: deepwiki
+    description: Answers questions about public GitHub repositories from their code and docs.
+    # Managed: DeepWiki answers take tens of seconds, which was unreliable through xAI-hosted MCP
+    # in live tests (see docs/xai-api-notes.md). Fast public servers can use mode: xai.
+    mode: managed
+    transport: streamable_http
+    url: https://mcp.deepwiki.com/mcp
+    allowed_tools: [ask_wiki_question, read_wiki_structure]
+    enabled: true
+
+knowledge_bases:
+  - name: Voice docs
+    slug: voice-docs
+    description: Upload the Voice Stack docs/ folder or your own voice playbooks here.
+    # Stored with xAI's Files API in an xAI Collection (created on first upload) and searched by
+    # xAI during calls with file_search. Use mode: local to keep files on this server instead.
+    mode: collections
+    top_k: 4
+
+transfer_targets:
+  - name: Developer relations
+    uri: sip:devrel@example.com
+    description: Example destination. Replace with your team's SIP URI or tel:+E.164 number.
+
+agents:
+  - slug: front-desk
+    name: Front Desk
+    description: Greets callers, works out what they need, and routes them.
+    is_entry: true
+    voice_id: ara
+    speed: 1.0
+    reasoning_effort: none
+    greeting_mode: model
+    greeting: Thanks for calling the Grok developer help line. What are you building today?
+    position: {x: 0, y: 160}
+    prompt_mode: sections
+    prompt_sections:
+      role: |
+        You are a warm, efficient front-desk guide for a developer help line about building with the xAI API.
+        You are not official xAI support and you never claim to be.
+      objective: |
+        Understand what the caller is building and route them to the right specialist in under a minute.
+      flow: |
+        - Ask one question at a time until you know the caller's topic and, if relevant, their SDK or language.
+        - Questions about voice agents, speech to speech, text to speech, telephony, or SIP go to the Voice Specialist.
+        - All other API, SDK, model, or pricing questions go to the API Guide.
+        - If the caller asks for a person, transfer them to Developer relations.
+      guardrails: |
+        - Do not answer technical questions yourself; route them.
+        - Give no legal or financial advice.
+        - If the caller mentions self-harm, abuse, or an emergency, respond with empathy, tell them to contact local emergency services, and transfer them to Developer relations.
+      style: |
+        - Spoken word only: no markdown, lists, or emojis.
+        - One or two short sentences per turn.
+        - Respond in the caller's language.
+        - If the input is unclear, ask a short clarifying question instead of guessing.
+    transfer_targets: [Developer relations]
+    allow_end_call: true
+
+  - slug: api-guide
+    name: API Guide
+    description: Answers questions about the xAI API, SDKs, and public repositories.
+    voice_id: rex
+    speed: 1.05
+    reasoning_effort: high
+    greeting_mode: none
+    position: {x: 420, y: 40}
+    builtin_tools:
+      web_search: {enabled: true, allowed_domains: [docs.x.ai, x.ai]}
+    prompt_mode: sections
+    prompt_sections:
+      role: |
+        You are a precise, friendly API guide for developers building with the xAI API.
+        The documentation lives at https://docs.x.ai.
+      objective: |
+        Answer the caller's API and SDK questions accurately from the documentation, then confirm they are unblocked.
+      flow: |
+        - Use web_search on docs.x.ai for API, model, and pricing questions. Answer only from what you find.
+        - Use `look_up_repository` when the caller names a GitHub repository.
+        - Use the deepwiki tools for questions about how a public repository's code works.
+        - When the topic turns to voice agents or telephony, hand the caller to the Voice Specialist.
+      guardrails: |
+        - If the documentation does not cover a question, say you do not know and suggest where to look.
+        - Never invent parameter names, prices, or limits.
+        - If the caller mentions self-harm, abuse, or an emergency, respond with empathy and tell them to contact local emergency services.
+      style: |
+        - Spoken word only: no markdown, code blocks, or lists.
+        - Say parameter and endpoint names plainly, for example "the reasoning effort parameter".
+        - Two or three short sentences per turn unless the caller asks for detail.
+        - Before a tool call, say one short line such as "Let me check the docs."
+    tools: [look_up_repository]
+    mcp_servers: [deepwiki]
+    allow_end_call: true
+
+  - slug: voice-specialist
+    name: Voice Specialist
+    description: Helps with speech to speech, voices, custom voices, and SIP telephony.
+    voice_id: eve
+    speed: 1.0
+    reasoning_effort: high
+    greeting_mode: none
+    position: {x: 420, y: 300}
+    keyterms: [xAI, Grok, SIP, WebSocket, ephemeral token, LangGraph]
+    builtin_tools:
+      web_search: {enabled: true, allowed_domains: [docs.x.ai]}
+    prompt_mode: sections
+    prompt_sections:
+      role: |
+        You are a calm, expert voice-agent engineer who helps developers build with xAI's speech to speech API.
+      objective: |
+        Help the caller design or debug their voice agent, telephony setup, or voice choice, and leave them with a clear next step.
+      flow: |
+        - Check the Voice docs knowledge base first for questions it covers, then web_search on docs.x.ai.
+        - For custom voices, mention that they are available only in the United States, excluding Illinois, and that other countries need to contact xAI sales.
+        - If the caller has a general API question outside voice, hand them to the API Guide.
+      guardrails: |
+        - Answer only from the knowledge base or the documentation; say you do not know otherwise.
+        - Never ask the caller to read out an API key.
+        - If the caller mentions self-harm, abuse, or an emergency, respond with empathy and tell them to contact local emergency services.
+      style: |
+        - Spoken word only: no markdown or lists.
+        - Short sentences. Check understanding after each step.
+        - When reading codes or IDs, say each character separately, separated by hyphens, and confirm.
+    knowledge_bases: [voice-docs]
+    allow_end_call: true
+
+handoffs:
+  - from: front-desk
+    to: api-guide
+    description: the caller has a question about the xAI API, SDKs, models, or pricing
+    voice_policy: switch
+    context_fields:
+      - {name: topic, type: string, description: "What the caller wants help with", required: true}
+      - {name: sdk, type: string, description: "SDK or language they use, if mentioned", required: false}
+  - from: front-desk
+    to: voice-specialist
+    description: the caller is building a voice agent or asks about speech, voices, telephony, or SIP
+    voice_policy: switch
+    context_fields:
+      - {name: use_case, type: string, description: "What the voice agent should do", required: true}
+      - {name: channel, type: string, description: "web or phone, if known", required: false}
+  - from: api-guide
+    to: voice-specialist
+    description: the conversation turns to voice agents, speech to speech, or telephony
+    voice_policy: switch
+    context_fields:
+      - {name: question, type: string, description: "The caller's voice question", required: true}
+  - from: voice-specialist
+    to: api-guide
+    description: the caller has a general API or SDK question that is not about voice
+    voice_policy: switch
+    context_fields:
+      - {name: question, type: string, description: "The caller's API question", required: true}

@@ -1,0 +1,28 @@
+# Two hosts: the builder (put it behind your identity proxy) and the public webhook host.
+# Replace the hosts and ingress class for your cluster. Long timeouts keep WebSockets open.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: voicestack
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/affinity: cookie
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: voice.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: voicestack-app, port: {name: http}}}
+    - host: voice-webhooks.example.com
+      http:
+        paths:
+          - path: /webhooks
+            pathType: Prefix
+            backend: {service: {name: voicestack-telephony, port: {name: http}}}
+          - path: /healthz
+            pathType: Exact
+            backend: {service: {name: voicestack-telephony, port: {name: http}}}

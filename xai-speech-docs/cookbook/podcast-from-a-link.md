@@ -1,0 +1,49 @@
+<!-- Source: https://docs.x.ai/cookbook/examples/podcast-from-a-link (markdown: https://docs.x.ai/cookbook/examples/podcast-from-a-link.md), fetched 2026-10-12. Do not edit; re-run fetch.sh. -->
+
+
+# Podcast from a Link
+
+This app builds an AI podcast generator with the Grok API that turns any article or PDF into a two-host episode. It shows how structured output and text to speech work together, and it's a good base for turning any reading into listening.
+
+Give it a link to an article or a PDF, and it writes and records a conversation about it between two hosts. Each line is voiced as soon as Grok writes it, so the episode starts playing within seconds, before the script is finished.
+
+## What you'll learn
+
+- Turn a web page or a PDF into input for Grok, uploading PDFs with the Files API
+- Stream a script as structured output and act on each line as soon as it's complete
+- Voice each line with text-to-speech, using speech tags like `[laugh]` and `<whisper>` to shape the delivery
+- Stream progress from a Node server to a web page with server-sent events
+
+## Run it
+
+You need Node.js 22.13 or later. Put your API key in `.env` at the root of the repo, or export `XAI_API_KEY`.
+
+```bash
+cd examples/podcast-from-a-link/typescript
+npm install
+npm run web
+```
+
+Open http://localhost:3000, paste a link or pick one, and click **Make episode**. The page works like a podcast app. The episode's title goes on its cover as soon as Grok writes it, the conversation fills the transcript line by line, and the episode starts playing as the first lines are recorded, with the line being spoken highlighted. Click a line, or its part of the progress bar, to jump to it.
+
+To make an episode from the terminal instead, pass a link or a path to a PDF:
+
+```bash
+npm start -- https://en.wikipedia.org/wiki/Voyager_Golden_Record
+```
+
+That saves the episode to `output/` as an MP3, with a Markdown transcript next to it.
+
+## How it works
+
+The shared code is in `src/podcast.ts`:
+
+1. `readSource()` fetches the page and strips the HTML down to text. For a PDF, it uploads the file with `client.files.upload()` and passes it to Grok as an `input_file`. The upload deletes itself after an hour.
+2. `writeScript()` streams the episode from `grok-4.7` with a JSON schema in `text.format`. As the JSON arrives, the stream's `json` event hands it the script so far, and it reports each line as soon as the next one starts, along with Grok's reasoning. It uses a low reasoning effort: at the default, Grok drafts the whole script before writing anything, which delays the first line by minutes.
+3. `recordLine()` voices a line with `client.voice.speak()`. The voice API reads unknown speech tags aloud instead of rejecting them, so the SDK's `stripInvalidSpeechTags()` first removes any tag the API doesn't know.
+
+`src/server.ts` records each line as soon as it's reported, four at a time, and streams its progress to the page as server-sent events. `public/index.html` is plain HTML and JavaScript that shows those events and plays the clips in order. `src/index.ts` does the same work in the terminal and joins the clips into one MP3.
+
+The prompt in `src/podcast.ts` makes the two voices co-hosts who both read the material and talk as equals. When one of them is set up as the interviewer, Grok writes a quiz instead: one asks nearly every question, and the other answers with facts. The prompt also says how long turns should be, from a few words to a whole paragraph, because otherwise every line comes out about the same length.
+
+To change the hosts or their voices, edit `HOSTS` in `src/podcast.ts`. `client.voice.list()` lists the built-in voices.

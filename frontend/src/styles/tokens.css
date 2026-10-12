@@ -1,0 +1,76 @@
+/*
+ * Design tokens. Values follow xAI's public design language (docs.x.ai, x.ai), read from the
+ * docs.x.ai stylesheet and screenshots on 2026-10-12. The orange live accent is approximate.
+ * xAI's own fonts are proprietary; Geist/Geist Mono (OFL) stand in. Override --font-display,
+ * --font-body, and --font-mono from a mounted stylesheet to use licensed faces.
+ */
+:root,
+[data-theme='dark'] {
+  --bg: #0a0a0a;
+  --l1: #121212;
+  --l2: #1a1a1a;
+  --l3: #212121;
+  --l4: #262626;
+  --inset: #111111;
+  --line: #262626;
+  --line-2: #303030;
+  --line-strong: #5e5e5e;
+  --fg: #f9f9f9;
+  --fg-2: #ababab;
+  --fg-3: #787878;
+  --fg-4: #5e5e5e;
+  --btn: #f9f9f9;
+  --btn-fg: #0a0a0a;
+  --btn-2: #1f1f1f;
+  --btn-2-hover: #2a2a2a;
+  --live: #f26b1d;
+  --live-soft: rgb(242 107 29 / 0.14);
+  --info: hsl(226 84% 73%);
+  --danger: hsl(356 80% 71%);
+  --success: #00d294;
+  --warn: hsl(38 92% 66%);
+  --grid-dot: #222222;
+  --shadow-pop: 0 16px 48px -12px rgb(0 0 0 / 0.7);
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  --bg: #ffffff;
+  --l1: #f9f8f6;
+  --l2: #f2f0ec;
+  --l3: #ebe8e3;
+  --l4: #e4e1db;
+  --inset: #efede9;
+  --line: #e9e7e3;
+  --line-2: #dedbd5;
+  --line-strong: #b9b6b0;
+  --fg: #080808;
+  --fg-2: #4f4f4f;
+  --fg-3: #7a7a7a;
+  --fg-4: #a3a3a3;
+  --btn: #0a0a0a;
+  --btn-fg: #f9f9f9;
+  --btn-2: #ecebe8;
+  --btn-2-hover: #e2e0dc;
+  --live: #e2550f;
+  --live-soft: rgb(226 85 15 / 0.1);
+  --info: hsl(228 47% 49%);
+  --danger: hsl(353 53% 43%);
+  --success: #009767;
+  --warn: hsl(32 85% 40%);
+  --grid-dot: #e4e1db;
+  --shadow-pop: 0 16px 48px -16px rgb(0 0 0 / 0.18);
+  color-scheme: light;
+}
+
+:root {
+  --font-display: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --topbar: 4rem;
+  --rail: 15.5rem;
+  --inspector: 22rem;
+  --dock: 27rem;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
